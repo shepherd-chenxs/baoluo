@@ -41,6 +41,9 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
+  # 产物文件名用 ASCII：中文文件名在部分下载端会乱码或被截断，
+  # 安装后的显示名仍是 productName（宝螺），不受这里影响。
+  artifactName: baoluo-setup-${version}.exe
   # 卸载时询问是否一并删除应用数据（%APPDATA%\Baoluo 下的模型/运行时/设置，约 4.4GB）
   # 见 build/installer.nsh 里的 customUnInstall
   include: build/installer.nsh
