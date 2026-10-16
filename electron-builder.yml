@@ -1,0 +1,46 @@
+appId: com.baoluo.app
+# 注意：appId 从历史的 com.baoluo.douyin-downloader 改成了通用命名。
+# Windows 按 appId 识别"同一个应用"，老版本用户升级时需要重装，不能就地覆盖。
+productName: 宝螺
+copyright: Copyright 2026 Baoluo contributors
+directories:
+  output: release
+files:
+  - dist/**
+  - package.json
+  - node_modules/ffmpeg-static/**
+# ffmpeg-static 里的 ffmpeg.exe 必须解出 asar 才能执行
+asarUnpack:
+  - node_modules/ffmpeg-static/**
+# whisper.cpp 二进制 + DLL 打包到 resources/whisper/
+extraResources:
+  - from: build/icon.ico
+    to: icon.ico
+  # 内置对话模板的两张人物形象图：随包分发，首次运行时由主进程复制到用户数据目录
+  - from: resources/template-assets
+    to: template-assets
+    filter:
+      - "**/*"
+  - from: resources/whisper
+    to: whisper
+    filter:
+      - "**/*"
+  # 预编译依赖轮子（jieba_fast）：用户端从 PyPI 装不了（只有源码包、需 C 编译器），
+  # 随包分发，约 7MB。其余依赖由用户端从国内 PyPI 镜像安装。
+  - from: resources/wheels
+    to: wheels
+    filter:
+      - "**/*"
+win:
+  executableName: Baoluo
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  # 卸载时询问是否一并删除应用数据（%APPDATA%\Baoluo 下的模型/运行时/设置，约 4.4GB）
+  # 见 build/installer.nsh 里的 customUnInstall
+  include: build/installer.nsh

@@ -1,0 +1,65 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+release/
+__tsc_out__/
+
+# Temp files
+tmp/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# TypeScript
+*.tsbuildinfo
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+
+# Coverage
+coverage/
+
+# Electron-builder artifacts
+*.blockmap
+
+# 图标调试预览（生成物，不入库）
+build/icon-preview.png
+
+# whisper.cpp pre-built binaries (downloaded by postinstall)
+resources/whisper/
+# 便携版 Python 运行时 + 预装依赖（由 postinstall 的 setup-python.cjs 生成，不入库）
+resources/python/
+# 预编译依赖轮子（由 setup-python.cjs 生成，随安装包分发，不入库）
+resources/wheels/
+# Local environment / setup files
+PATH.txt
+settings.txt
+# 应用配置（含 API Key / ModelScope 令牌），任何情况下都不入库
+settings.json
+resources/settings.json
+
+# electron-builder 本地缓存（winCodeSign / nsis 等二进制，体积上百 MB）
+.electron-builder-cache/
+.electron-cache/
+# npm 配置（可能含私有 registry 令牌）
+.npmrc
+
+# 本地工具产物（Windows 文件权限恢复记录，含本机账户标识）
+.acl-recovery/

@@ -1,0 +1,5216 @@
+* {
+  box-sizing: border-box;
+}
+/* 顶部菜单高度：正文区和整屏布局都要减去它，所以只在这里定义一次 */
+:root {
+  /* 和主进程的 TOPBAR_HEIGHT 保持一致；系统给了 windowControlsOverlay 就听系统的 */
+  --topnav-h: env(titlebar-area-height, 46px);
+}
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif;
+  color: #1d1d1f;
+  background: #f2f2f7;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: #f2f2f7;
+}
+
+/* ---------------- 滚动条（全站统一：细、无轨道底色、圆头） ----------------
+   注意：不要在同一元素上再写 scrollbar-width / scrollbar-color。
+   Chromium 一旦看到标准属性，就会整体忽略 ::-webkit-scrollbar，
+   这里那套圆头样式等于白写（原来的 hot-list / app-select-menu 就踩过）。 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.16);
+  border-radius: 999px;
+  /* 边框用透明色 + padding-box：视觉上比 8px 更细，且不贴边 */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.subtitle {
+  color: #86868b;
+  margin: 0 0 24px 0;
+  font-size: 14px;
+}
+
+textarea.paste {
+  width: 100%;
+  min-height: 180px;
+  padding: 14px 16px;
+  font-size: 15px;
+  line-height: 1.6;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  resize: vertical;
+  background: #fff;
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+textarea.paste:focus {
+  border-color: #007aff;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
+}
+textarea.paste.tts-paste {
+  /* TTS 页面：随文字自动变高，无上限（不启用内部滚动，由外层页面滚动） */
+  resize: none;
+  overflow: hidden;
+  /* 加大底部留白，光标停在最后一行时不会贴边 */
+  padding-bottom: 36px;
+}
+
+/* ---------- 取色弹窗（ColorPicker）---------- */
+.color-picker {
+  position: relative;
+  display: inline-flex;
+}
+.color-picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.color-picker-trigger:hover {
+  border-color: rgba(0, 0, 0, 0.24);
+}
+.color-picker-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.color-picker-swatch {
+  display: block;
+  width: 22px;
+  height: 22px;
+  /* 圆点：色块本身是个"颜色指示"，圆形比圆角方块更像；「无色」的斜纹也跟着被裁成圆 */
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+/* 「无色」的色块：透明格 + 一道斜杠，和普通色块同尺寸，回显时不用文字 */
+.color-picker-swatch.is-transparent,
+.color-picker-cell-none {
+  position: relative;
+  background: repeating-linear-gradient(
+    45deg,
+    #fff,
+    #fff 5px,
+    #f0f0f2 5px,
+    #f0f0f2 10px
+  );
+}
+.color-picker-swatch.is-transparent::after,
+.color-picker-cell-none::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top right,
+    transparent 47%,
+    #ff3b30 47%,
+    #ff3b30 53%,
+    transparent 53%
+  );
+  border-radius: inherit;
+  pointer-events: none;
+}
+.color-picker-menu {
+  z-index: 9999;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  padding: 10px;
+}
+.color-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+.color-picker-cell {
+  /*
+   * 调色格子改成圆形：
+   * 高度原来写死 26px、宽度由网格给（约 30px），两边不等 —— 直接 50% 会变成椭圆。
+   * 所以放开高度、用 aspect-ratio 跟着列宽走：格子变成正方形，圆才是正圆。
+   */
+  aspect-ratio: 1 / 1;
+  height: auto;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+}
+.color-picker-cell.selected {
+  outline: 2px solid #007aff;
+  outline-offset: 1px;
+}
+.color-picker-cell-none {
+  cursor: pointer;
+}
+.color-picker-custom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
+}
+.color-picker-native {
+  width: 34px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+.color-picker-hex {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+}
+.color-picker-custom .hint {
+  flex-shrink: 0;
+}
+
+.char-counter {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 4px 0;
+  font-size: 12px;
+  color: #86868b;
+  user-select: none;
+  transition: color 0.2s;
+}
+.char-counter .char-counter-text {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
+}
+.char-counter .char-counter-hint {
+  color: #ff3b30;
+  font-weight: 500;
+}
+.char-counter.is-warn {
+  color: #ff9500;
+}
+.char-counter.is-limit {
+  color: #ff3b30;
+  font-weight: 500;
+}
+.char-counter.is-limit .char-counter-hint {
+  animation: charCounterShake 0.3s ease-in-out;
+}
+@keyframes charCounterShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2px); }
+  75% { transform: translateX(2px); }
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  align-items: center;
+}
+
+button {
+  padding: 9px 18px;
+  font-size: 15px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+  transition: transform 0.12s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+button.primary {
+  background: #007aff;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.28);
+}
+button.primary:hover:not(:disabled) {
+  background: #0071e8;
+}
+button.secondary {
+  background: #f2f3f5;
+  color: #1d1d1f;
+  border-color: transparent;
+}
+button.secondary:hover:not(:disabled) {
+  background: #e9eaee;
+}
+button.secondary.secondary-outlined {
+  background: #fff;
+  border-color: rgba(0, 0, 0, 0.12);
+  color: #1d1d1f;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+button.secondary.secondary-outlined:hover:not(:disabled) {
+  background: #f7f8fa;
+  border-color: rgba(0, 0, 0, 0.2);
+}
+/* 只留边框、不留底色（「保存模板」这类次要动作，别跟主按钮抢眼） */
+button.secondary.secondary-plain {
+  background: transparent;
+  border-color: rgba(0, 0, 0, 0.25);
+  box-shadow: none;
+  color: #1d1d1f;
+}
+button.secondary.secondary-plain:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.38);
+}
+/* 主按钮的描边款：去底色去光晕，留蓝色表达"这是这排里的主操作" */
+button.primary.primary-plain {
+  background: transparent;
+  border-color: rgba(0, 122, 255, 0.5);
+  box-shadow: none;
+  color: #007aff;
+}
+button.primary.primary-plain:hover:not(:disabled) {
+  background: rgba(0, 122, 255, 0.06);
+  border-color: rgba(0, 122, 255, 0.65);
+}
+button.start-btn {
+  background: rgba(0, 122, 255, 0.1);
+  color: #007aff;
+  border: 1px solid rgba(0, 122, 255, 0.45);
+  font-weight: 600;
+}
+button.start-btn:hover:not(:disabled) {
+  background: rgba(0, 122, 255, 0.16);
+  color: #0066d6;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+
+.error {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: #ffe5e7;
+  border: 1px solid #ffb8bf;
+  border-radius: 12px;
+  color: #c20e2b;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+.card {
+  margin-top: 20px;
+  padding: 18px 20px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 16px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  display: flex;
+  gap: 18px;
+}
+/* 封面图：固定宽度、高度随素材自身比例——横的显横、竖的显竖（不再定死竖框裁切）；
+   黑底圆角跟图文解说的视频预览框同款 */
+.card img {
+  width: 200px;
+  height: auto;
+  /* 加载失败时别塌成一条；成功时这个值会被素材自身比例撑开 */
+  min-height: 112px;
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: 12px;
+  background: #000;
+  flex-shrink: 0;
+}
+.card .meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.card .title {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: #1d1d1f;
+  word-break: break-all;
+}
+.card .info {
+  color: #86868b;
+  font-size: 13px;
+}
+.card .actions {
+  margin-top: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.progress {
+  margin-top: 12px;
+  height: 6px;
+  background: #ececf0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.progress > div {
+  height: 100%;
+  background: #007aff;
+  transition: width 0.2s ease;
+}
+.progress.indeterminate > div {
+  animation: progress-indeterminate 1.4s ease-in-out infinite;
+}
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(340%);
+  }
+}
+
+.status {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #86868b;
+}
+.status .link {
+  margin-left: 10px;
+  padding: 0;
+  font-size: 13px;
+}
+
+.auto-download-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  font-size: 13px;
+  color: #636366;
+  cursor: pointer;
+  user-select: none;
+}
+.auto-download-label input {
+  accent-color: #007aff;
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+.platform-badge {
+  /* .meta 是纵向 flex，不写这句会被拉成通栏条——徽章就该贴着自己的内容 */
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  margin-bottom: 6px;
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.1);
+  color: #007aff;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.hint {
+  font-size: 12px;
+  color: #8e8e93;
+  line-height: 1.5;
+}
+
+.output-dir-hint {
+  font-size: 13px;
+  color: #636366;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.disclaimer {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  color: #a1a1a6;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* ---------------- 关于页 ---------------- */
+.about-view .card-pad + .card-pad {
+  margin-top: 20px;
+}
+.about-rows {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 8px 12px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.about-label {
+  color: #8e8e93;
+  font-size: 13px;
+}
+.about-inactive {
+  color: #8e8e93;
+}
+.about-authorize-btn {
+  margin-left: 14px;
+}
+.about-unbind-btn {
+  margin-left: 8px;
+}
+/* 日志目录：路径可能很长，单行截断 + 悬停看全，按钮不跟着换行 */
+.about-log-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.about-log-dir {
+  font-family: Consolas, Menlo, monospace;
+  font-size: 12px;
+  background: #f6f7f9;
+  border-radius: 6px;
+  padding: 3px 6px;
+  min-width: 0;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl; /* 从尾部截断：路径结尾才是关键信息 */
+  text-align: left;
+}
+.about-log-path .small {
+  flex-shrink: 0;
+}
+.about-community {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+.about-community-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+}
+.about-qr {
+  width: 140px;
+  height: 140px;
+  object-fit: contain;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+}
+.about-qr-placeholder {
+  width: 140px;
+  height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed rgba(0, 0, 0, 0.18);
+  border-radius: 10px;
+  color: #a1a1a6;
+  font-size: 12px;
+  text-align: center;
+  padding: 8px;
+}
+.changelog-item {
+  font-size: 13px;
+}
+.changelog-item summary {
+  cursor: pointer;
+  color: #1d1d1f;
+  font-weight: 600;
+  padding: 4px 0;
+}
+.changelog-item ul {
+  margin: 6px 0 10px;
+  padding-left: 20px;
+  color: #636366;
+  line-height: 1.7;
+}
+.link-button {
+  display: inline-flex;
+  align-items: center;
+  padding: 9px 18px;
+  border-radius: 10px;
+  font-size: 15px;
+  text-decoration: none;
+}
+
+/* 文案提取面板 */
+.transcribe-panel {
+  margin-top: 16px;
+  padding: 18px 20px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 16px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+.transcribe-panel .panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #1d1d1f;
+}
+.tr-live {
+  margin-top: 10px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: #f6f7f9;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 10px;
+  font-family: "SF Mono", Consolas, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #636366;
+}
+.tr-text {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: #f6f7f9;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #1d1d1f;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.seg-mode-toggle {
+  margin-top: 12px;
+}
+.seg-mode-btn {
+  padding: 6px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  background: #fff;
+  color: #3a3a3c;
+  font-size: 13px;
+  cursor: pointer;
+}
+.seg-mode-btn.active {
+  background: rgba(0, 122, 255, 0.1);
+  border-color: rgba(0, 122, 255, 0.4);
+  color: #007aff;
+  font-weight: 600;
+}
+.tr-textarea {
+  margin-top: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #1d1d1f;
+  resize: vertical;
+  font-family: inherit;
+}
+.tr-segments {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tr-seg-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: #f6f7f9;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 9px;
+}
+.tr-seg-time {
+  flex-shrink: 0;
+  font-family: "SF Mono", Consolas, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #8e8e93;
+  white-space: nowrap;
+}
+.tr-seg-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 7px;
+  background: #fff;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  resize: none;
+  font-family: inherit;
+}
+.tr-seg-input:focus {
+  outline: none;
+  border-color: rgba(0, 122, 255, 0.5);
+}
+
+/* ---------------- 语音合成 / 语音识别 ---------------- */
+.tts-controls {
+  margin-top: 18px;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tts-controls .form-row select {
+  min-width: 0;
+  width: 100%;
+}
+.tts-controls .hint {
+  white-space: nowrap;
+}
+.audio-preview {
+  width: 100%;
+  margin-top: 12px;
+  height: 40px;
+}
+.asr-file {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.asr-file-icon {
+  font-size: 18px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.asr-file-name {
+  font-size: 13px;
+  color: #3a3a3c;
+  word-break: break-all;
+  min-width: 0;
+}
+
+/* ---------------- 顶部拖拽条 & 内容区 ----------------
+   顶部原来是一体式菜单，导航搬去左栏（SideNav）后，
+   这条只负责托着系统三个按钮的 46px 覆盖层，放个品牌角标。 */
+.topnav {
+  position: relative;
+  z-index: 30;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: var(--topnav-h);
+  padding: 0 16px;
+  /* 右上角那三个系统按钮压在页面上，这里按覆盖层宽度把右边让出来。
+     取不到 windowControlsOverlay 宽度时（env 不生效）兜底留 150px，
+     宁可多留一点，也不能让内容钻到按钮底下。 */
+  padding-right: max(150px, calc(100vw - env(titlebar-area-width, 100vw)));
+  background: #ffffff;
+  /* 分隔线用向下 1px 的投影，不用 border-bottom：
+     右上角系统按钮的覆盖层（46px 高、白底）正好压在 border 上，
+     边框方案会让线在按钮底下断一截；投影落在那一层之下，整条线才连续。 */
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
+  /* 整条是窗口拖拽区 */
+  -webkit-app-region: drag;
+}
+.topnav-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.brand-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 与工作台页的 topnav-brand-logo 一致（22px）：同一个角落，切页不该变大变小 */
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+.brand-icon-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.brand-name {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+.content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 32px 36px 56px;
+}
+
+/* ---------------- 左侧导航（SideNav：一级 + 二级 + 底部关于/授权） ----------------
+   挂在各页左栏顶部（.split-list / .ws-list 里），不是全局独立一条——
+   任务/方案列表和导航共用同一条左栏，宽度才吃得起。
+   .side-nav 自身 display:contents：菜单组和「关于」脚直接成为左栏的 flex 子项，
+   「关于」靠 order 沉到栏底（中间由各页自己的列表撑满）。
+*/
+.side-nav {
+  display: contents;
+}
+.side-nav-brand {
+  display: flex;
+  align-items: center;
+  padding: 2px 4px 4px;
+}
+.side-nav-brand-logo {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+/* 「关于」页标题里那个 16px 小 logo（BrandLogo 的 inline 变体） */
+.brand-logo-inline {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 5px;
+  vertical-align: -2px;
+  object-fit: contain;
+}
+.side-nav-group {
+  order: 0;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.side-nav-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.side-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: #3a3a3c;
+  font-size: 13.5px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.side-nav-item:hover:not(.active) {
+  background: rgba(0, 0, 0, 0.045);
+  color: #1d1d1f;
+}
+.side-nav-item.active {
+  background: rgba(0, 122, 255, 0.1);
+  color: #0066d6;
+  font-weight: 500;
+}
+.side-nav-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+/* 二级菜单：缩进一档，左边一条细线暗示从属关系 */
+.side-nav-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: 17px;
+  padding: 2px 0 2px 10px;
+  border-left: 1px solid rgba(0, 0, 0, 0.08);
+}
+.side-nav-subitem {
+  padding: 5px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #636366;
+  font-size: 12.5px;
+  font-family: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.side-nav-subitem:hover:not(.active) {
+  background: rgba(0, 0, 0, 0.05);
+  color: #1d1d1f;
+}
+.side-nav-subitem.active {
+  background: rgba(0, 122, 255, 0.1);
+  color: #0066d6;
+  font-weight: 500;
+}
+/* 底部：关于 + 授权徽章。flex:1 的 group 把它压到左栏最下面 */
+.side-nav-foot {
+  /* 沉到左栏最底：排在各页列表之后（NavPage 纯导航栏里靠 margin-top:auto 压底） */
+  order: 99;
+  margin-top: auto;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+/*
+ * 页头标题：多数页面是 .view 的直接子元素；
+ * 但钉住的页头（.story-pagehead）会把 h2 包一层——那时 `>` 就选不中了，
+ * 标题会退回浏览器默认样式（字号变小、上下留白变大），所以这里两种都写。
+ */
+.view > h2,
+.story-pagehead > h2 {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  margin: 0 0 6px 0;
+}
+.settings-page-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.service-status-chip {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+.service-status-chip.running {
+  background: rgba(52, 199, 89, 0.12);
+  color: #1a7f37;
+}
+.service-status-chip.stopped {
+  background: rgba(142, 142, 147, 0.14);
+  color: #636366;
+}
+.view > .subtitle {
+  color: #86868b;
+  margin: 0 0 24px 0;
+  font-size: 14px;
+}
+
+/* ---------------- Dialogue panel scaffolding ---------------- */
+.panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+
+/* ---------------- 对话视频生成面板 ---------------- */
+.dialogue-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media (max-width: 860px) {
+  .two-col {
+    grid-template-columns: 1fr;
+  }
+}
+
+.role-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media (max-width: 860px) {
+  .role-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.mode-switch {
+  display: flex;
+  gap: 4px;
+  background: #e9e9ee;
+  border-radius: 10px;
+  padding: 3px;
+  max-width: 420px;
+}
+.template-switch {
+  display: flex;
+  gap: 4px;
+  background: #e9e9ee;
+  border-radius: 10px;
+  padding: 3px;
+}
+.mode-btn {
+  flex: 1;
+  padding: 8px 14px;
+  font-size: 14px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #3a3a3c;
+  cursor: pointer;
+  transition: background 0.18s, color 0.18s, box-shadow 0.18s;
+}
+.mode-btn:hover:not(.active) {
+  color: #1d1d1f;
+}
+.mode-btn.active {
+  background: #fff;
+  color: #1d1d1f;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+/* ---------------- 模板菜单 + 配置/生成 分栏 ---------------- */
+.template-layout {
+  display: flex;
+  flex-direction: row-reverse;
+  gap: 16px;
+  align-items: flex-start;
+}
+.template-menu {
+  width: 176px;
+  flex-shrink: 0;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 16px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  padding: 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: sticky;
+  top: 16px;
+}
+.template-menu-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8e8e93;
+  padding: 2px 10px 8px;
+}
+.template-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #3a3a3c;
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.template-menu-item:hover:not(.active) {
+  background: rgba(0, 0, 0, 0.045);
+  color: #1d1d1f;
+}
+.template-menu-item.active {
+  background: #007aff;
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.28);
+}
+.template-menu-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+.template-menu-label {
+  flex: 1;
+  text-align: left;
+}
+.template-saved-dot {
+  font-size: 10px;
+  color: #34c759;
+  line-height: 1;
+}
+.template-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.collapse-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 0;
+}
+.collapse-header:hover .panel-title {
+  color: #007aff;
+}
+/* 标题右侧：保存 / 重置 + 折叠箭头，靠右排成一行 */
+.collapse-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.collapse-header-actions .status {
+  margin: 0;
+}
+.collapse-header-actions .collapse-arrow {
+  margin-left: 4px;
+}
+/* 重置：文字按钮，但用警示色，跟保存区分开 */
+button.link.danger-link {
+  color: #ff3b30;
+}
+.collapse-arrow {
+  font-size: 14px;
+  color: #8e8e93;
+  transition: transform 0.18s ease;
+}
+.collapse-arrow.open {
+  color: #007aff;
+}
+/* 甲方 / 乙方：两张卡片左右并排（窄窗口收成一列） */
+.template-config {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+/* 画面方向：模板配置里的一个参数，跟在两张角色卡下面（不挤进那个两列网格） */
+.template-canvas-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+.template-canvas-row .story-field-label {
+  flex-shrink: 0;
+}
+.template-canvas-row .app-select {
+  width: 180px;
+  max-width: 100%;
+}
+@media (max-width: 860px) {
+  .template-config {
+    grid-template-columns: 1fr;
+  }
+}
+.role-card {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: #fafafa;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* 卡片内部：图片在上，参数在图片下面，一列排下来 */
+.role-main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.role-main .image-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+}
+.role-main .image-preview {
+  /*
+   * 与热点成片的镜头图框同一个模式：正方形 + contain。
+   * 竖版图就竖着显示、横版图就横着显示（留白不裁切）——角色形象图常被裁掉半边脸。
+   * 尺寸上限 182px 与 .shot-image-slot 一致；窄窗口里靠 max-width 缩，不破坏正方形。
+   */
+  width: 182px;
+  max-width: 100%;
+  aspect-ratio: 1 / 1;
+  height: auto;
+  flex-shrink: 0;
+  background: #fff;
+  border: 1.5px dashed rgba(0, 0, 0, 0.18);
+  border-radius: 12px;
+}
+.role-main .image-preview.filled {
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.08);
+}
+.role-main .image-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.role-main .image-actions {
+  justify-content: center;
+}
+.role-right {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.role-right .form-row {
+  grid-template-columns: 56px 1fr auto;
+  gap: 6px;
+}
+.role-right .prosody-value {
+  min-width: 34px;
+}
+.role-selects {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+/* 前面的标签（运镜 / 音色）：宽度跟「幅度」那一列对齐（.role-right .form-row 的 56px），不参与压缩 */
+.role-selects .story-field-label {
+  flex: 0 0 56px;
+  color: #636366;
+  font-size: 13px;
+  font-weight: 400;
+}
+.role-selects .app-select {
+  flex: 1;
+  min-width: 0;
+}
+.role-prosody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.voice-group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #636366;
+}
+.voice-group-title .status {
+  margin: 0;
+}
+.voice-group .app-select {
+  width: 100%;
+}
+.voice-preview-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.voice-preview-row .app-select {
+  flex: 1;
+  min-width: 0;
+}
+.speaker-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  font-size: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s;
+}
+.speaker-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  line-height: 1;
+  font-size: 14px;
+}
+.speaker-svg {
+  display: block;
+}
+.speaker-btn:hover {
+  background: #f6f7f9;
+  border-color: rgba(0, 0, 0, 0.18);
+}
+.speaker-btn:disabled {
+  opacity: 0.8;
+  cursor: wait;
+}
+.speaker-btn.active {
+  animation: speaker-icon-pulse 1.2s ease-in-out infinite;
+}
+@keyframes speaker-icon-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+}
+@media (max-width: 1100px) {
+  .template-layout {
+    flex-direction: column;
+  }
+  .template-menu {
+    width: 100%;
+    position: static;
+    flex-direction: row;
+    align-items: center;
+  }
+  .template-menu-title {
+    padding: 2px 10px;
+  }
+  .template-content {
+    width: 100%;
+  }
+}
+
+.scene-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.scene-row {
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+  align-items: flex-start;
+  background: #fafafa;
+}
+.scene-row .image-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 30%;
+  min-width: 0;
+  padding: 0;
+}
+.scene-row .image-preview {
+  width: 100%;
+  height: 150px;
+  flex-shrink: 0;
+}
+.scene-row .image-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.scene-row .image-actions {
+  justify-content: center;
+}
+.scene-right {
+  flex: 1 1 70%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.scene-right .form-row {
+  grid-template-columns: 56px 1fr auto;
+  gap: 6px;
+}
+.scene-right .prosody-value {
+  min-width: 34px;
+}
+.scene-right .row.tight {
+  margin-top: 0;
+}
+.scene-text {
+  width: 100%;
+  font-family: "SF Mono", Consolas, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 8px 10px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  resize: vertical;
+  background: #fff;
+  outline: none;
+}
+.scene-text:focus {
+  border-color: #007aff;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
+}
+
+.card-pad {
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 16px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.panel-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.panel-title-row .status {
+  margin-top: 0;
+}
+/* 标题右侧的动作组（保存模板 / 重置）：跟状态、按钮排成一行贴右边 */
+.panel-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.image-slot {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+}
+.image-label {
+  font-weight: 600;
+  color: #636366;
+}
+.image-preview {
+  width: 100%;
+  height: 110px;
+  background: #f6f7f9;
+  border: 1px dashed rgba(0, 0, 0, 0.12);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.image-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.image-empty {
+  color: #a1a1a6;
+  font-size: 13px;
+}
+.image-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+button.small {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+button.big {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 15px;
+  border-radius: 12px;
+}
+button.danger {
+  border-color: rgba(255, 59, 48, 0.35);
+  color: #ff3b30;
+  background: #fff;
+}
+/* 红色描边、不留底色（跟 secondary-plain 同思路，给警示类的次要动作） */
+button.danger.danger-plain {
+  background: transparent;
+}
+button.danger.danger-plain:hover:not(:disabled) {
+  background: rgba(255, 59, 48, 0.06);
+}
+button.danger:hover:not(:disabled) {
+  background: #fff0ef;
+}
+
+button.link {
+  background: transparent;
+  border: none;
+  color: #007aff;
+  padding: 0;
+  font-size: 12px;
+  cursor: pointer;
+}
+button.link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.settings-extra {
+  border-top: 1px dashed rgba(0, 0, 0, 0.12);
+  padding-top: 10px;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 120px 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+.form-row label {
+  color: #636366;
+  font-size: 13px;
+}
+.form-row input,
+.form-row select,
+.form-row textarea {
+  padding: 8px 10px;
+  font-size: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  background: #fff;
+  outline: none;
+  font-family: inherit;
+}
+.form-row textarea {
+  resize: vertical;
+  min-height: 72px;
+  line-height: 1.5;
+}
+.form-row input:focus,
+.form-row select:focus,
+.form-row textarea:focus {
+  border-color: #007aff;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
+}
+select option {
+  padding: 14px 14px;
+  font-size: 14px;
+  line-height: 2;
+}
+.app-select {
+  position: relative;
+  min-width: 0;
+  width: 100%;
+}
+.app-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: inherit;
+  color: #1d1d1f;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.app-select-trigger:hover {
+  border-color: rgba(0, 0, 0, 0.18);
+}
+.app-select-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.app-select-caret {
+  color: #8e8e93;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.app-select-menu {
+  /* z-index 9999：AppSelect 已改为 React Portal 渲染到 body，避免被其他面板遮挡 */
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  padding: 5px;
+  max-height: 280px;
+  overflow-y: auto;
+  /* 菜单按最长选项撑开（至少和触发按钮同宽），别把「无（静止）」挤成两行 */
+  width: max-content;
+  right: auto;
+  max-width: min(320px, calc(100vw - 16px));
+}
+.app-select-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 12px 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #1d1d1f;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.app-select-option:hover {
+  background: #f2f3f5;
+}
+.app-select-option.selected {
+  color: #007aff;
+  font-weight: 600;
+  background: rgba(0, 122, 255, 0.08);
+}
+/*
+ * 菜单被夹窄（见 AppSelect 的宽度上限）时，选项从 nowrap 换成换行：
+ * 一行放不下就折成两行，不从菜单里横着溢出去。
+ */
+.app-select-menu.wrap-options .app-select-option {
+  white-space: normal;
+  word-break: break-word;
+}
+.voice-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+}
+.voice-group + .voice-group {
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  padding-top: 12px;
+}
+.voice-check-group {
+  margin-top: 14px;
+}
+.voice-check-group-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8e8e93;
+  margin-bottom: 8px;
+}
+.voice-check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+}
+.voice-check-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  border-radius: 9px;
+  background: #fff;
+  font-size: 13px;
+  color: #3a3a3c;
+  user-select: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.voice-check-item:hover {
+  border-color: rgba(0, 122, 255, 0.35);
+  background: rgba(0, 122, 255, 0.04);
+}
+.voice-check-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+.voice-check-label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.voice-check-item input {
+  accent-color: #007aff;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.voice-preview-btn {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+.local-status {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 9px;
+  font-size: 13px;
+  background: #f2f2f7;
+  color: #3a3a3c;
+}
+.local-status.online {
+  background: rgba(52, 199, 89, 0.12);
+  color: #1a7f37;
+}
+.local-status.offline {
+  background: rgba(255, 149, 0, 0.12);
+  color: #b25000;
+}
+.clone-enable-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  border-radius: 12px;
+}
+.clone-enable-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.clone-enable-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.clone-enable-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1c1c1e;
+}
+.clone-enable-sub {
+  font-size: 12px;
+  color: #8e8e93;
+}
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 26px;
+  flex-shrink: 0;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.switch .slider {
+  position: absolute;
+  inset: 0;
+  background: #d1d1d6;
+  border-radius: 13px;
+  transition: background 0.2s;
+  cursor: pointer;
+}
+.switch .slider::before {
+  content: "";
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  left: 3px;
+  top: 3px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s;
+}
+.switch input:checked + .slider {
+  background: #34c759;
+}
+.switch input:checked + .slider::before {
+  transform: translateX(18px);
+}
+.switch input:disabled + .slider {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.clone-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  border-radius: 10px;
+  background: #fff;
+}
+.clone-item-main {
+  min-width: 0;
+  flex: 1;
+}
+.clone-item-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1c1c1e;
+}
+.clone-item-lang {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #8e8e93;
+}
+.clone-item-path {
+  font-size: 12px;
+  color: #8e8e93;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.clone-preview {
+  margin-top: 10px;
+}
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.modal-card {
+  width: min(360px, calc(100vw - 48px));
+  background: #fff;
+  border-radius: 14px;
+  padding: 22px 20px 18px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+}
+.clone-modal {
+  width: min(720px, calc(100vw - 48px));
+  text-align: left;
+  align-items: stretch;
+  padding: 20px 22px 16px;
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
+}
+.clone-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.clone-modal-head h3 {
+  margin: 0;
+  font-size: 17px;
+  color: #1c1c1e;
+}
+.clone-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 2px 2px 8px;
+}
+.clone-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+.clone-list-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.clone-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.model-library-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 2px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+.clone-model-card {
+  margin-bottom: 14px;
+}
+.subtitle-editor-card {
+  padding-top: 32px;
+}
+.subtitle-editor-card .subtitle-preview {
+  margin: 0 auto;
+}
+.subtitle-params {
+  margin-top: 48px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.subtitle-editor-card .form-row input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+.range-value {
+  min-width: 58px;
+  text-align: right;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: #636366;
+}
+.save-reset-row .reset-button {
+  background: #e1e3e8 !important;
+  color: #1d1d1f !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+}
+.save-reset-row .reset-button:hover:not(:disabled) {
+  background: #d5d7dd !important;
+  color: #1d1d1f !important;
+}
+.model-library-header .panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.model-library-summary {
+  font-size: 12px;
+  font-weight: 500;
+  color: #86868b;
+}
+.model-library-item:last-of-type {
+  border-bottom: none;
+}
+.model-library-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.model-library-name {
+  font-weight: 600;
+  color: #1c1c1e;
+  white-space: nowrap;
+}
+.model-library-lang {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-size: 12px;
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.1);
+  color: #007aff;
+}
+.model-library-info .hint {
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.model-library-status {
+  font-size: 13px;
+  color: #86868b;
+  white-space: nowrap;
+}
+.model-library-status.ok {
+  color: #1a7f37;
+  font-weight: 600;
+}
+.model-library-status.busy {
+  color: #007aff;
+}
+.model-library-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.clone-modal .form-row {
+  grid-template-columns: 88px minmax(0, 1fr) 96px;
+}
+.clone-modal .form-row > label {
+  justify-self: end;
+  text-align: right;
+}
+.clone-modal .form-row input,
+.clone-modal .form-row select,
+.clone-modal .form-row textarea {
+  width: 100%;
+  min-width: 0;
+}
+.clone-modal .form-row > button {
+  justify-self: start;
+  white-space: nowrap;
+}
+.modal-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-message {
+  font-size: 14px;
+  line-height: 1.55;
+  color: #1c1c1e;
+  word-break: break-word;
+}
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+.modal-actions .primary {
+  min-width: 100px;
+}
+.motion-controls {
+  border-top: 1px dashed rgba(0, 0, 0, 0.08);
+  padding: 10px 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.motion-title {
+  font-size: 12px;
+  color: #8e8e93;
+  font-weight: 600;
+}
+.prosody-row input[type="range"] {
+  width: 100%;
+  accent-color: #007aff;
+  height: 26px;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+.prosody-value {
+  font-family: "SF Mono", Consolas, Menlo, monospace;
+  font-size: 12px;
+  color: #8e8e93;
+  min-width: 44px;
+  text-align: right;
+}
+.form-row input[type="color"] {
+  width: 48px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+.form-row input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.form-row input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 6px;
+}
+.color-hex {
+  font-family: "SF Mono", Consolas, Menlo, monospace;
+  font-size: 12px;
+  color: #8e8e93;
+}
+
+.row.tight {
+  gap: 6px;
+}
+.row.right-aligned {
+  justify-content: flex-end;
+}
+
+.script-edit {
+  width: 100%;
+  min-height: 200px;
+  margin-top: 8px;
+  font-family: "SF Mono", Consolas, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  padding: 12px 14px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  resize: vertical;
+  background: #fff;
+  outline: none;
+}
+.script-edit:focus {
+  border-color: #007aff;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
+}
+/*
+ * 对话脚本 · 生成区：主题吃掉左边大部分宽度，时长 + 「AI 写脚本」贴右端竖排对齐。
+ * 比原来五列硬挤的网格透气：主题给足输入空间，控制组自成一块不跟主题抢行。
+ */
+.script-gen {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  background: #fafafb;
+}
+.script-gen-topic {
+  flex: 1 1 260px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.script-gen-topic > .story-field-label {
+  font-size: 12.5px;
+}
+.script-gen-ctrl {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+.script-gen-duration {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.script-gen-duration > .story-field-label {
+  font-size: 12.5px;
+}
+.script-gen-duration .app-select {
+  width: 104px;
+}
+.script-gen-ctrl .primary {
+  flex-shrink: 0;
+  white-space: nowrap;
+  height: 38px;
+}
+.script-topic-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 52px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: inherit;
+  line-height: 1.5;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+  background: #fff;
+  outline: none;
+  /* 跟热点成片的主题一样：可以拉高，但宽度跟着这一列走 */
+  resize: vertical;
+}
+.script-topic-input:focus {
+  border-color: #007aff;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
+}
+/* 编辑区标题栏：左「脚本内容」+ 格式说明，右行数徽标 */
+.script-edit-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+.script-edit-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+.script-edit-count {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: #1a7f37;
+  background: rgba(52, 199, 89, 0.12);
+  border-radius: 999px;
+  padding: 2px 9px;
+  white-space: nowrap;
+}
+.script-edit-count.is-empty {
+  color: #8e8e93;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.subtitle-preview {
+  position: relative;
+  margin: 0 auto;
+  border-radius: 14px;
+  overflow: hidden;
+  background-image: url("./assets/zimu-background.jpg");
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+}
+.preview-subtitle {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 92%;
+  padding: 6px 14px;
+  border-radius: 4px;
+  text-align: center;
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: 0.3px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.warnings {
+  background: #fff7d6;
+  border: 1px solid rgba(212, 167, 44, 0.28);
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #57534a;
+}
+
+.parsed-preview summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: #636366;
+  user-select: none;
+  padding: 4px 0;
+}
+.parsed-list {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-top: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 10px;
+  background: #f6f7f9;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.parsed-line {
+  display: flex;
+  gap: 4px;
+  padding: 2px 0;
+}
+.parsed-line.type-a .who {
+  color: #007aff;
+  font-weight: 600;
+}
+.parsed-line.type-b .who {
+  color: #ff3b30;
+  font-weight: 600;
+}
+.parsed-line.type-unknown .who {
+  color: #a1a1a6;
+}
+
+.progress-area {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.about-machine-code {
+  font-family: Consolas, Menlo, monospace;
+  font-size: 12px;
+  background: #f6f7f9;
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+/* ---------------- v0.5.0 热点成片 ---------------- */
+.story-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+/*
+ * 左栏列表 + 右区内容（视频生成那四个页面共用：图文解说 / 对话模式 / 热点成片 / 爆款嗅探）。
+ *   左区 = 标题 + 列表（自己滚，标题就永远在视野里，不用再做 sticky）
+ *   右区 = 内容操作区，独立滚动
+ * 两区贴在一起、靠一条分隔线划分，所以不留空隙。
+ * 结构由 SideList 组件统一渲染，这里只管长相。
+ */
+.split {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  height: calc(100vh - var(--topnav-h));
+  min-height: 420px;
+  /* 不再是浮在灰底上的圆角卡片：直接铺满，靠分隔线划分区域 */
+  background: #fff;
+  overflow: hidden;
+}
+.split-list {
+  width: 268px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  min-height: 0;
+  /* 两区之间的分隔线画在这里（右区不再画，免得两条） */
+  border-right: 1px solid rgba(0, 0, 0, 0.07);
+}
+.split-title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  margin: 0;
+}
+.split-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+/* ---------------- 对话模板库（对话模式右区的一块） ---------------- */
+.tpl-new-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tpl-name-input {
+  flex: 1;
+  min-width: 200px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #fff;
+}
+.tpl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tpl-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: #fff;
+}
+.tpl-card-main {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tpl-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tpl-default-chip {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #0066d6;
+  background: rgba(0, 122, 255, 0.12);
+  border-radius: 999px;
+  padding: 0 7px;
+  line-height: 18px;
+}
+/* 「默认」标记用绿系：跟蓝色的「使用中」区分开（绿 = 工作台建卡会用它） */
+.tpl-default-chip.is-default {
+  color: #1a7f37;
+  background: rgba(52, 199, 89, 0.14);
+}
+/* 已是默认的那颗按钮：描边变绿，一眼看出当前状态 */
+.tpl-card-actions .secondary-plain.is-default {
+  color: #1a7f37;
+  border-color: rgba(52, 199, 89, 0.5);
+}
+/* 名字就地可改：去掉输入框的样子，看着像标题，点进去才是输入框 */
+.tpl-card-name {
+  width: 100%;
+  padding: 2px 4px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1c1c1e;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+.tpl-card-name:hover {
+  border-color: rgba(0, 0, 0, 0.1);
+}
+.tpl-card-name:focus {
+  background: #fff;
+  border-color: #007aff;
+  outline: none;
+}
+.tpl-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 4px;
+  font-size: 11px;
+  color: #8e8e93;
+}
+.tpl-card-time {
+  margin-left: auto;
+}
+.tpl-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.split-items {
+  /* 列表自己滚：左栏固定高度，条目再多也不把标题顶走 */
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  /* 只竖着滚：横向溢出会把 ✕ 挤出可视区、还多一条滚动条 */
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.split-empty {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #8e8e93;
+  padding: 2px;
+}
+/* 左栏底部常驻入口（.split-items 占满剩余空间，所以它自然贴底） */
+.split-foot {
+  /* 比「关于」的 order(99) 更靠后：页面自己的底部入口保持在最底 */
+  order: 100;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.split-foot > button {
+  width: 100%;
+  justify-content: center;
+}
+.side-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 10px;
+}
+.side-row:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+.side-row.active {
+  background: rgba(0, 122, 255, 0.1);
+}
+.side-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 10px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  overflow: hidden;
+}
+.side-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1c1c1e;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.side-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  color: #8e8e93;
+}
+.side-item-meta > span {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+/* 时间靠右：左边是「几张图 / 已成片」，右边是「什么时候动过」 */
+.side-item-meta > span:last-child {
+  margin-left: auto;
+}
+.side-done {
+  color: #1a7f37;
+  background: rgba(52, 199, 89, 0.14);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.side-del {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: #c7c7cc;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: inherit;
+  /* ZCode 式：默认藏着，悬浮到这一行才现身（选中行常显） */
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.side-row:hover .side-del,
+.side-row.active .side-del {
+  opacity: 1;
+}
+.side-del:hover {
+  color: #c20e2b;
+  background: rgba(255, 59, 48, 0.08);
+}
+.split-work {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  /* 内容操作区自己滚：左栏标题与列表保持不动 */
+  overflow-y: auto;
+  padding: 16px 18px;
+}
+/* 窄屏：整屏分栏放不下，退回普通纵向流式页面（列表在上、内容在下，整页一起滚） */
+@media (max-width: 1000px) {
+  .split {
+    flex-direction: column;
+    align-items: stretch;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+    background: transparent;
+    border-radius: 0;
+  }
+  .split-list {
+    width: 100%;
+    max-height: 220px;
+    padding: 12px;
+    background: #fff;
+    border-radius: 16px;
+    border-right: none;
+  }
+  .split-items {
+    overflow-y: auto;
+  }
+  .split-work {
+    margin-top: 16px;
+    overflow: visible;
+    padding: 0;
+  }
+}
+/* 窄屏：列表横过来放上面，别把工作台挤成一条 */
+.story-view .story-card {
+  gap: 14px;
+}
+.story-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #fff2f0;
+  color: #c0392b;
+  border: 1px solid rgba(255, 77, 79, 0.25);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+.story-error .link {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+/* 一条错误可能带两个出口（复制提示词 / 去设置），别把它们甩到两头 */
+.story-error-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+/* 绿色提示：不是错误（例如关了自动发送，提示词已填好、等用户点发送） */
+.story-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #f0f9eb;
+  color: #1a7f37;
+  border: 1px solid rgba(26, 127, 55, 0.22);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.story-hint .link {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+/* 设置页的开关行：checkbox + 说明（T-004「生图时自动发送」） */
+.checkline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+  font-size: 13px;
+  color: #1d1d1f;
+}
+.checkline input {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  accent-color: #007aff;
+}
+.story-muted {
+  color: #86868b;
+  font-size: 12px;
+}
+.story-field-label {
+  color: #636366;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* ---------- ① 选题 ---------- */
+.story-config-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.story-config-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.story-source-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.story-source-select {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.story-source-select .app-select {
+  width: 220px;
+}
+.hot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 12px;
+  background: #fafafa;
+  padding: 6px;
+}
+.hot-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.hot-item:hover {
+  background: #fff;
+}
+.hot-item.active {
+  background: #fff;
+  border-color: rgba(0, 122, 255, 0.45);
+  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.12);
+}
+.hot-rank {
+  width: 24px;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #c7c7cc;
+  text-align: center;
+}
+.hot-item:nth-child(1) .hot-rank,
+.hot-item:nth-child(2) .hot-rank,
+.hot-item:nth-child(3) .hot-rank {
+  color: #ff9500;
+}
+.hot-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hot-heat {
+  flex-shrink: 0;
+  color: #a1a1a6;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.story-divider {
+  border-top: 1px dashed rgba(0, 0, 0, 0.12);
+}
+.story-topic-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 24px;
+}
+/* 主题：和别的字段同一套排法（标签在左），但它是文本域，占满剩下三列 */
+.story-topic-row .story-topic-label {
+  /* 文本域是多行的：标签跟第一行文字对齐，不要跟整块垂直居中 */
+  align-self: start;
+  padding-top: 9px;
+}
+.story-topic-row .story-topic-wide {
+  grid-column: 2 / -1;
+  resize: vertical;
+  min-height: 52px;
+  line-height: 1.5;
+}
+.story-topic-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) 76px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+.story-topic-row > .story-field-label {
+  /* 标签右对齐：跟右边的输入框/下拉框贴齐（主题那个文本域也并进了这套排法） */
+  text-align: right;
+}
+.story-topic-row .story-duration,
+.story-topic-row .story-direction-pick,
+.story-topic-row .story-voice-pick {
+  width: 100%;
+  min-width: 0;
+}
+.story-direction-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.story-direction-pick .story-field-label {
+  flex-shrink: 0;
+}
+.story-topic-row .story-duration .app-select,
+.story-topic-row .story-direction-pick .app-select {
+  width: 100%;
+}
+.story-ai-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+/* 主按钮下面那排小动作（只出分镜 / 中止 / 收起） */
+.story-ai-links {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+}
+.ai-generate-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 18px 6px 6px;
+  border: none;
+  border-radius: 999px;
+  background: #007aff;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.18s, opacity 0.18s, transform 0.12s;
+}
+.ai-generate-button:hover {
+  background: #0066d9;
+}
+.ai-generate-button:active {
+  transform: scale(0.97);
+}
+.ai-generate-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+  transform: none;
+}
+.ai-generate-icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+}
+/*
+ * 任务卡头部用的紧凑版：同一个「AI 成片」视觉识别（蓝底胶囊 + AI 圆标），
+ * 但高度收进标题行——原尺寸那颗是给工作台标题区用的，直接搬到卡头会把那行撑高一倍。
+ */
+.ai-generate-button.compact {
+  padding: 3px 14px 3px 3px;
+  gap: 8px;
+  font-size: 13px;
+}
+.ai-generate-button.compact .ai-generate-icon {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}
+/* 工作区卡：卡身直接是内嵌工作台，不留步骤列表的上边距 */
+.ws-workbench {
+  margin-top: 4px;
+}
+/*
+ * 工作台内嵌版的「去卡片化」：操作区一列内容宽只有 ~440px，
+ * 整页那套「外卡 18px 内距 + 镜头卡再一层边框内距」要吃掉三层，
+ * 真正装内容的宽度只剩一半多点。这里把壳全部拍平：
+ * 段落（①②③）靠标题 + 分隔线，镜头靠行分隔线，就绪状态交给「图已就绪」徽章。
+ * 作用域收在 .ws-workbench 里，「热点成片」整页的大卡片版式不受影响。
+ */
+.ws-workbench .card-pad.story-card {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
+}
+/* 段落之间：一条分隔线 + 上下留白，代替原来各自的卡片壳 */
+.ws-workbench .story-card + .story-card {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
+}
+/* 镜头列表：卡片壳退场，改行分隔；就绪的绿边由「图已就绪」徽章表达 */
+.ws-workbench .shot-list {
+  gap: 0;
+}
+.ws-workbench .shot-card {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 10px 0;
+}
+.ws-workbench .shot-card + .shot-card {
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
+}
+/* 就绪态的绿左边框也一并退场（这条要压过 .shot-card.ready，得跟在上面那条之后） */
+.ws-workbench .shot-card.ready {
+  border-left: none;
+}
+.ws-workbench .shot-card:first-child {
+  padding-top: 2px;
+}
+/* 字段名那一行：左边是标签，右边放"只属于这个字段"的小动作（例如画面提示词的「重写」） */
+.story-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
+}
+.story-field-head .link {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.story-field-head .link:disabled {
+  color: #c7c7cc;
+  cursor: default;
+}
+/*
+ * 输入类控件的公共外观。
+ * 注意：主题是 **textarea**（.story-topic-input），只写 `.story-topic-row input`
+ * 盖不到它 —— 那样它会退回浏览器默认的边框/内边距/字体，跟旁边几个框看着不是一套。
+ */
+.story-topic-row input,
+.story-topic-input,
+.story-niche-input,
+.story-duration .app-select-trigger,
+.board-field input,
+.shot-field textarea {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: inherit;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  background: #fff;
+  outline: none;
+}
+.story-topic-row input:focus,
+.story-topic-input:focus,
+.board-field input:focus,
+.shot-field textarea:focus {
+  border-color: #007aff;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
+}
+.story-gen-tip {
+  color: #007aff;
+  font-size: 13px;
+  padding-left: 2px;
+}
+.story-resume-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: rgba(0, 122, 255, 0.06);
+  border: 1px dashed rgba(0, 122, 255, 0.3);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+.resume-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+.story-empty {
+  color: #a1a1a6;
+  font-size: 13px;
+  text-align: center;
+  padding: 24px 10px;
+}
+
+/* ---------- ② 分镜工作台 ---------- */
+/*
+ * 统一的圆角与边框（热点成片这一页）：
+ * 原来输入框/下拉框是 10px + rgba(0,0,0,0.08)，图片槽与预览框是 12px + rgba(0,0,0,0.18)，
+ * 镜头卡片又是 14px —— 三种弧度、两种颜色混在一屏里。
+ * 现在统一成：圆角 12px、边框色 rgba(0,0,0,0.12)；
+ * 「空框」仍然用虚线（那是"这里可以放/还没内容"的含义，不是风格差异），但线宽跟别的框一样是 1px。
+ */
+.story-view .story-topic-input,
+.story-view .story-niche-input,
+.story-view .board-field input,
+.story-view .shot-field textarea,
+.story-view .app-select-trigger,
+.story-view .shot-image-slot,
+.story-view .compose-preview {
+  border-color: rgba(0, 0, 0, 0.12);
+  border-width: 1px;
+  border-radius: 12px;
+}
+.story-view .shot-card {
+  border-radius: 12px;
+}
+/*
+ * 上面那条覆盖规则排在基础的 focus 规则之后、优先级又相同，
+ * 不补这一条的话聚焦时边框不会变蓝（会被上面的 0.12 灰色盖掉）。
+ */
+.story-view .story-topic-input:focus,
+.story-view .story-niche-input:focus,
+.story-view .board-field input:focus,
+.story-view .shot-field textarea:focus,
+.story-view .app-select-trigger:focus {
+  border-color: #007aff;
+}
+.board-fields {
+  /* 一行一个：标题/钩子要拿去发布，横着排挤成三列看不清 */
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* AI 定好的只读值：当文本念出来，不套输入框（点进去也改不了，那是假的交互暗示） */
+.board-readonly {
+  font-size: 13px;
+  color: #636366;
+  min-width: 0;
+  word-break: break-all;
+}
+.board-field {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+/* 标签右对齐：跟右边的内容贴齐，一行一个读起来更顺 */
+.board-field .story-field-label {
+  text-align: right;
+}
+/*
+ * 合成栏里唯一可改的一项（画面方向）：下拉别铺满整列（整列 500 多像素，
+ * 一个「横版 16:9」的下拉拉那么长看着空），收到刚好装下这行字的宽度：
+ * 14px 微软雅黑下「横版 16:9」约 59px + 内边距 16 + 箭头和间距约 16。
+ */
+.board-field .app-select {
+  max-width: 120px;
+}
+/* 选项文字不长，触发按钮内边距也收一点 */
+.board-field .app-select-trigger {
+  padding: 8px;
+}
+/*
+ * 标题的编辑框：别铺满整列（整列有 500 多像素，一个标题框那么长看着空）。
+ * 显示态仍是整列文本 + ✎，只有点开编辑时才收窄。
+ */
+.board-title-input {
+  max-width: 380px;
+}
+/* 可内联编辑的值：文本 + 右边的编辑图标 */
+.board-editable {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.board-editable .board-readonly {
+  /*
+   * 显示态跟编辑框同宽（380px）—— ✎ 就落在框的右端附近，而不是被推到整列最右边。
+   * 文字超过就省略号，完整标题看 title 悬浮提示。
+   */
+  flex: 0 1 380px;
+  min-width: 0;
+  color: #1d1d1f;
+}
+.board-edit-btn {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: #8e8e93;
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.board-edit-btn:hover {
+  background: #f0f0f2;
+  color: #007aff;
+}
+.board-toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+/* 批量生图进度条（T-003）：跑的时候是中性提示，结束后偏绿 */
+.batch-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #f0f7ff;
+  color: #1a5fb4;
+  border: 1px solid rgba(26, 95, 180, 0.22);
+  border-radius: 12px;
+  padding: 10px 14px;
+  margin: 10px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.batch-progress.done {
+  background: #f2fbf4;
+  color: #1e7d3b;
+  border-color: rgba(30, 125, 59, 0.24);
+}
+.batch-progress .story-muted {
+  color: inherit;
+  opacity: 0.75;
+}
+.batch-progress .link {
+  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: inherit;
+}
+.shot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.shot-card {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  background: #fafafa;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color 0.2s;
+}
+.shot-card.ready {
+  border-left: 3px solid rgba(52, 199, 89, 0.55);
+}
+.shot-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.shot-index {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1d1d1f;
+}
+.shot-state {
+  font-size: 11px;
+  color: #ff9500;
+  background: rgba(255, 149, 0, 0.12);
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-weight: 600;
+}
+.shot-state.ok {
+  color: #1a7f37;
+  background: rgba(52, 199, 89, 0.13);
+}
+.shot-head-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+/* 图文解说：这一行最左边是「清除图片」文字按钮，跟右边的实心小按钮多留一点空 */
+.dialogue-view .shot-head-actions {
+  gap: 10px;
+}
+.shot-body {
+  display: grid;
+  /* 第一列 = 图片槽宽度 */
+  grid-template-columns: 182px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.shot-image-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.shot-image-slot {
+  /* 正方形 + contain（跟工作台的角色图一个模式）：横向图就横着显示、纵向图就竖着显示，
+     留白而不是把图裁掉 —— 竖版 9:16 与横版 16:9 的成片都能看清自己那张图长什么样。 */
+  width: 182px;
+  height: 182px;
+  background: #fff;
+  border: 1.5px dashed rgba(0, 0, 0, 0.18);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.18s, box-shadow 0.18s;
+}
+.shot-image-slot:hover {
+  border-color: #007aff;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.1);
+}
+.shot-image-slot.filled {
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.08);
+}
+/* 只读（过程态）：图只给看，点不动也不响应拖放，所以别装出能点的样子 */
+.shot-image-slot.readonly {
+  cursor: default;
+}
+.shot-image-slot.readonly:hover {
+  border-color: rgba(0, 0, 0, 0.18);
+  box-shadow: none;
+}
+/*
+ * 只读（过程态）的文本框：框照旧（改纯文字会把排好的布局弄散），
+ * 但给一层浅灰底——不然它跟能编辑时长得一模一样，用户会白敲半天字。
+ */
+.story-readonly textarea[readonly],
+.story-readonly textarea:disabled,
+.story-readonly input:disabled,
+/* 下拉框也是禁用态的一种（触发器是 button），不能落下：不然只读卡里输入框灰、下拉框白 */
+.story-readonly .app-select-trigger:disabled {
+  background: #f4f4f6;
+  color: #4a4a4f;
+  cursor: default;
+}
+.shot-image-slot img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+/*
+ * 图文解说：图片框固定正方形（210 列宽 + aspect-ratio），不再跟右列等高拉成长条——
+ * 长条里 contain 一张横图会空出大片留白，方框看着才稳。
+ * 只作用于对话视频页（.dialogue-view），热点成片的镜头卡保持原地不动。
+ */
+.dialogue-view .shot-body {
+  grid-template-columns: 210px minmax(0, 1fr);
+  align-items: start;
+}
+.dialogue-view .shot-image-slot {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+}
+/* 图片框下方的「清除图片」：小一号的描边按钮，跟图框同宽居中 */
+.shot-image-clear {
+  align-self: center;
+  padding: 3px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 8px;
+  background: transparent;
+  color: #636366;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.shot-image-clear:hover {
+  color: #c20e2b;
+  border-color: rgba(255, 59, 48, 0.45);
+  background: rgba(255, 59, 48, 0.05);
+}
+/* 没图时常显但禁用：占位不变，放图/清图时画面不晃 */
+.shot-image-clear:disabled {
+  color: #c7c7cc;
+  border-color: rgba(0, 0, 0, 0.07);
+  background: transparent;
+  cursor: default;
+}
+.shot-image-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: #a1a1a6;
+  font-size: 12px;
+  text-align: center;
+  padding: 12px;
+  line-height: 1.4;
+}
+.shot-image-plus {
+  font-size: 28px;
+  color: #c7c7cc;
+  font-weight: 300;
+}
+.shot-image-sub {
+  color: #c7c7cc;
+  font-size: 11px;
+}
+.shot-motion-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.shot-motion-row .app-select {
+  /* 运镜回到窄的图片列（182px）：占满列宽 */
+  width: 100%;
+  min-width: 0;
+}
+/* 图文解说的运镜在右侧文案列里（列很宽）：宽度跟上面那行的「音色」下拉对齐，
+   两个下拉框一条竖线，看着是一套 */
+.dialogue-view .shot-motion-row .app-select {
+  width: var(--shot-select-w, 320px);
+  flex: 0 1 var(--shot-select-w, 320px);
+}
+/* 分镜卡里两个下拉（音色 / 运镜）的统一宽度 */
+.dialogue-view .shot-list {
+  --shot-select-w: 320px;
+}
+/*
+ * 图文解说 / 对话模式右区去卡片化（跟工作台任务卡那套同一思路）：
+ * 原来是「外层大卡 → 镜头卡」两层壳，剥掉边框/内距后真正装内容的宽度只剩一半多点。
+ * 段落（分镜 / 脚本 / 合成视频）靠标题 + 分隔线划分，镜头之间靠行分隔线。
+ * 只作用于 .flat-panel，热点成片整页与工作台内嵌版各自另有作用域。
+ */
+.flat-panel {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
+}
+/* 相邻两段之间：一条分隔线 + 上下留白，代替原来各自的卡片壳 */
+.flat-panel + .flat-panel {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
+}
+.flat-panel .shot-list {
+  gap: 0;
+}
+.flat-panel .shot-card {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 12px 0;
+}
+.flat-panel .shot-card + .shot-card {
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
+}
+/* 就绪态的绿左边框退场（状态由「图已就绪」徽章表达）；要压过 .shot-card.ready，写在它后面 */
+.flat-panel .shot-card.ready {
+  border-left: none;
+}
+.flat-panel .shot-card:first-child {
+  padding-top: 4px;
+}
+/*
+ * 热点成片整页去卡片化：段落（① 选题 / ② 文案+生图 / ③ 合成视频）拍平成标题 + 分隔线，
+ * 镜头改行分隔。规则与 .ws-workbench 那套一致，只是宿主不同（整页右区本来就宽，两层壳白吃内距）。
+ */
+.flat-panels .card-pad.story-card {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
+}
+.flat-panels .story-card + .story-card {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
+}
+.flat-panels .shot-list {
+  gap: 0;
+}
+.flat-panels .shot-card {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 12px 0;
+}
+.flat-panels .shot-card + .shot-card {
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
+}
+.flat-panels .shot-card.ready {
+  border-left: none;
+}
+.flat-panels .shot-card:first-child {
+  padding-top: 4px;
+}
+/* 画面提示词那一行右边的小动作（重写 / 生图） */
+.story-field-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+/* 分镜卡片里的运镜幅度滑杆：列宽只有 182px，收窄才放得下 */
+.shot-motion-row input[type="range"] {
+  /* 运镜这一行现在在右侧文案列里，滑杆可以放宽一些（原来在窄图片列只有 72px） */
+  width: 160px;
+  /* 允许收窄：窗口拉到最小时先让滑杆让位，别把卡片顶破 */
+  flex: 0 1 160px;
+  min-width: 80px;
+  margin: 0;
+}
+.shot-motion-row .story-muted {
+  font-size: 11px;
+  white-space: nowrap;
+}
+/* 分镜里每个镜头的解说员：音色一行 + 语速/音调/音量三列，别把卡片撑太高 */
+/* 「语速」跟在「音色」同一条线上：音色下拉可伸缩，语速占固定的后半截 */
+.shot-prosody {
+  /* 让位顺序：先让滑杆收窄，再让下拉收窄——这样窗口正常宽度下两个下拉都还是 320 */
+  flex: 1 1 200px;
+  min-width: 120px;
+  max-width: 300px;
+  margin-left: 6px;
+}
+.shot-prosody .form-row {
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 6px;
+}
+.shot-prosody .prosody-value {
+  min-width: 36px;
+}
+/* 字段名后面跟的小注（例如「画面提示词（AI 建议 5 秒）」里的括号说明） */
+.story-field-note {
+  color: #a1a1a6;
+  font-weight: 400;
+  font-size: 12px;
+}
+.shot-text-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+/*
+ * 让左右两列的"底"落在同一条水平线上：左列最后一行是「运镜」，右列最后一行是
+ * 「画面提示词」的文本域，两边的内容高度天然不等（图片 180 + 运镜 vs 两个文本域）。
+ * 做法是两边都往底边靠：左列的运镜用 margin-top:auto 顶到底，
+ * 右列最后一个字段吃掉多余高度（谁高就由另一边补齐，两个方向都能对齐）。
+ * 只限定在热点成片（.story-view）：对话视频页共用 .shot-body/.shot-image-col，
+ * 那边左列没有运镜行，不该跟着变。
+ */
+.story-view .shot-body {
+  align-items: stretch;
+}
+.story-view .shot-image-col > .shot-motion-row {
+  margin-top: auto;
+}
+.story-view .shot-text-col > .shot-field:last-child {
+  flex: 1;
+}
+.story-view .shot-text-col > .shot-field:last-child textarea {
+  height: 100%;
+}
+.shot-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+/* 「解说词 / 字幕」这行：现在只有一个标签（编辑入口的「打开」按钮已去掉） */
+.shot-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+/* 「音色」这行：标签在左，下拉框跟在右边（下拉框占满剩余宽度，最多 360px） */
+.shot-inline-row {
+  display: flex;
+  align-items: center;
+  /* 间距跟下面「运镜」那行一致（8px）：两个下拉框的左边缘占同一条竖线 */
+  gap: 8px;
+  /* 音色行与录音行等高：切「语音合成 / 录音模式」时这一行不跳，看着不闪 */
+  min-height: 36px;
+}
+.shot-inline-row .voice-preview-row {
+  /* 宽度 = 下拉框 + 试听喇叭（36）+ 间距（6）：和最下面的「运镜」下拉等宽。
+     不抢占富余宽度（余量留给语速滑杆），挤不下时才缩 */
+  flex: 0 1 calc(var(--shot-select-w, 320px) + 42px);
+  min-width: 0;
+  max-width: calc(var(--shot-select-w, 320px) + 42px);
+}
+.shot-field textarea {
+  resize: vertical;
+  /* 解说词框里的字比正文小一号，长文案看着不挤 */
+  font-size: 13px;
+  line-height: 1.5;
+}
+.shot-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 26px;
+}
+
+/* ---------- ③ 合成视频 ---------- */
+.generate-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.generate-voice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.generate-voice .app-select {
+  width: 240px;
+}
+.generate-row .big {
+  width: auto;
+}
+
+/* ---------------- AI 一键成片（三步进度条） ----------------
+   写分镜 → 生图 → 合成视频。三步各自的形态由 class 决定：
+   todo 待开始 / doing 进行中（呼吸）/ done 完成 / wait 等用户动手 / fail 失败。 */
+.story-pipeline {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f7f8fa;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* 等用户动手时换个暖色，提示"这里需要你" */
+.story-pipeline.waiting {
+  background: #fff8ec;
+}
+.story-pipeline.error {
+  background: #fff5f5;
+}
+/*
+ * 一键成片的横向步骤条：圆点 + 文字，点与点之间用线连起来，
+ * 每步均分撑满整行（最后一步除外）——线把三步串成一条时间轴。
+ */
+.story-pipeline-steps {
+  display: flex;
+  align-items: center;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  /* 步骤条不跟着容器拉满：卡片里占多宽都收在 420 内，连线和圆点比例才正常 */
+  max-width: 420px;
+}
+.story-pipeline-step {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: #86868b;
+  flex: 1;
+  min-width: 0;
+}
+/* 最后一步没有连线，也不用均分剩余空间 */
+.story-pipeline-step:last-child {
+  flex: 0;
+}
+.story-pipeline-label {
+  white-space: nowrap;
+}
+/* 这一步连向下一步的线；这一步完成（.done）时变绿，跟圆点一个语义 */
+.story-pipeline-line {
+  flex: 1;
+  min-width: 16px;
+  height: 2px;
+  margin: 0 10px 0 6px;
+  border-radius: 1px;
+  background: #e5e5ea;
+}
+.story-pipeline-step.done .story-pipeline-line {
+  background: #34c759;
+}
+/*
+ * 工作台的任务卡比整页窄得多（最窄 ~480px），内嵌的分镜工作台按整页设计的
+ * 版式会被挤爆。这里把工作台声明成容器，下面用容器查询做窄版式：
+ * 容器不够宽（任务卡 / 窄窗口）时自动切紧凑排布，宽的时候还是整页那一套。
+ */
+.hot-story-workbench {
+  container: hot-story / inline-size;
+}
+@container hot-story (max-width: 720px) {
+  /* 榜单来源一行放不下：下拉吃满剩余，说明文字整行挪到下面 */
+  .hot-story-workbench .story-source-row {
+    flex-wrap: wrap;
+  }
+  .hot-story-workbench .story-source-select {
+    flex: 1;
+    min-width: 0;
+  }
+  .hot-story-workbench .story-source-select .app-select {
+    width: 100%;
+    min-width: 0;
+  }
+  .hot-story-workbench .story-source-row > .story-muted {
+    flex-basis: 100%;
+  }
+  /* 主题区和「成片」按钮竖着排：按钮靠右收尾。
+     字段保持整页那套 4 列排法（标签+控件×2 一行两组）：
+     窄列里一 field 一行太费高度，短字段（时长/方向）两两配对省一半。 */
+  .hot-story-workbench .story-topic-layout {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .hot-story-workbench .story-topic-row {
+    grid-template-columns: 72px minmax(0, 1fr) 72px minmax(0, 1fr);
+  }
+  .hot-story-workbench .story-ai-zone {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+  }
+  /* 镜头卡：图片列收窄，重写/生图那行允许折行 */
+  .hot-story-workbench .shot-body {
+    grid-template-columns: 140px minmax(0, 1fr);
+  }
+  .hot-story-workbench .shot-image-slot {
+    width: 140px;
+    height: 140px;
+  }
+  .hot-story-workbench .story-field-head {
+    flex-wrap: wrap;
+  }
+  .hot-story-workbench .board-toolbar,
+  .hot-story-workbench .compose-head-actions {
+    flex-wrap: wrap;
+  }
+  /* 预览框缩一档，右边设定列才有位置 */
+  .hot-story-workbench .compose-preview {
+    width: 170px;
+    height: 302px;
+  }
+}
+.story-pipeline-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #e5e5ea;
+  color: #fff;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.story-pipeline-step.doing {
+  color: #007aff;
+  font-weight: 600;
+}
+.story-pipeline-step.doing .story-pipeline-dot {
+  background: #007aff;
+  animation: speaker-icon-pulse 1.2s ease-in-out infinite;
+}
+.story-pipeline-step.done {
+  color: #1d1d1f;
+}
+.story-pipeline-step.done .story-pipeline-dot {
+  background: #34c759;
+}
+.story-pipeline-step.wait {
+  color: #b26a00;
+  font-weight: 600;
+}
+.story-pipeline-step.wait .story-pipeline-dot {
+  background: #ff9500;
+}
+.story-pipeline-step.fail {
+  color: #c0392b;
+  font-weight: 600;
+}
+.story-pipeline-step.fail .story-pipeline-dot {
+  background: #ff3b30;
+}
+.story-pipeline-msg {
+  font-size: 13px;
+  color: #3a3a3c;
+}
+.story-pipeline-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.story-pipeline-actions .story-muted {
+  font-size: 12px;
+  color: #86868b;
+}
+.progress-track {
+  height: 8px;
+  background: #e9e9ee;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: #007aff;
+  border-radius: 999px;
+  transition: width 0.2s;
+}
+/* ---------- ③ 合成视频：左预览（固定大小）、右按钮 ---------- */
+/* ③ 标题行右侧：状态说明 + 「合成视频」文字按钮（+ 合成中的取消） */
+.compose-head-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.compose-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 18px;
+  /* stretch：让右列跟左侧预览框一样高，里面的内容才能真正的"垂直居中" */
+  align-items: stretch;
+}
+/* 「视频输出：<路径> [在文件夹中显示]」这一行（下面那个独立的输出位置块已去掉） */
+/* 固定大小的预览框：横屏片子横着显示、竖屏片子竖着显示（画面 contain，不裁切） */
+.compose-preview {
+  /* 竖屏 9:16（225:400 也正好是 9:16）：竖版成片能一格铺满，横版则上下留白 */
+  width: 225px;
+  height: 400px;
+  background: #f6f7f9;
+  /* 与热点成片的统一口径一致：圆角 12px、1px、rgba(0,0,0,0.12)（对话模式也复用这一套） */
+  border: 1px dashed rgba(0, 0, 0, 0.12);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.compose-preview.filled {
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.08);
+  /* 有片子时用黑底：竖屏片子两侧的留白看起来是有意的 */
+  background: #000;
+}
+.compose-preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.compose-preview-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: #a1a1a6;
+  font-size: 13px;
+}
+.compose-preview-icon {
+  font-size: 18px;
+  opacity: 0.6;
+}
+.compose-side {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 14px;
+  min-width: 0;
+}
+/*
+ * 视频输出：放在 ③ 卡片底部、跨整宽（不再是右列里的一行）。
+ * 整宽之后路径与按钮同一行也放得下，上面那排信息的宽度也不受影响。
+ */
+.compose-actions {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed rgba(0, 0, 0, 0.12);
+}
+.compose-actions .story-field-label {
+  text-align: right;
+}
+/*
+ * 路径与按钮同一行：路径 flex:1（长路径单行省略），按钮不许被挤换行。
+ * 代价是路径那一段比上面四个值窄一个按钮的宽度 —— 要路径也占满整列，
+ * 只能把按钮挪走（例如右上角动作区）。
+ */
+.compose-actions-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.compose-actions-main button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+/* 成片路径：按用户要求加回灰底"输入框"的样子（浅灰底 + 内边距 + 圆角） */
+.story-result-path {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: #636366;
+  background: #f6f7f9;
+  padding: 6px 10px;
+  border-radius: 10px;
+  /* 路径很长：单行省略，完整路径在 title 里 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 980px) {
+  .story-topic-layout {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+  .story-ai-zone {
+    justify-content: flex-end;
+  }
+  .story-topic-row {
+    grid-template-columns: 1fr;
+  }
+  .board-fields {
+    grid-template-columns: 1fr;
+  }
+  .shot-body {
+    grid-template-columns: 1fr;
+  }
+  /*
+   * 窄窗口里图片列变成一整行：方框靠 aspect-ratio 保持正方，
+   * 但别撑满整行宽（那会太大）——给个上限、居中。
+   */
+  .dialogue-view .shot-image-slot {
+    width: min(280px, 100%);
+    margin: 0 auto;
+  }
+}
+
+/* ---------------- 爆款嗅探（本地音视频 → 转写 → 拆方法） ---------------- */
+.sniff-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.sniff-niche-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+.sniff-niche-row > .story-field-label {
+  text-align: right;
+}
+.sniff-niche-input,
+.sniff-topic-input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: inherit;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  background: #fff;
+  outline: none;
+}
+.sniff-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #636366;
+}
+.sniff-progress-indeterminate {
+  transition: width 0.4s ease;
+}
+.sniff-analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.sniff-analysis-item {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+}
+.sniff-analysis-item > .story-field-label {
+  text-align: right;
+  padding-top: 4px;
+}
+.sniff-analysis-item.wide {
+  grid-column: 1 / -1;
+}
+.sniff-analysis-item p {
+  margin: 0;
+  line-height: 1.7;
+  font-size: 14px;
+}
+.sniff-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  background: rgba(255, 149, 0, 0.14);
+  color: #a35a00;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.sniff-topic-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.sniff-topic-chip {
+  padding: 7px 12px;
+  font-size: 13px;
+  border-radius: 999px;
+  background: #f6f7f9;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  color: #1d1d1f;
+  cursor: pointer;
+}
+.sniff-topic-chip:hover {
+  background: rgba(0, 122, 255, 0.08);
+  border-color: rgba(0, 122, 255, 0.35);
+}
+.sniff-topic-chip.active {
+  background: rgba(0, 122, 255, 0.12);
+  border-color: rgba(0, 122, 255, 0.55);
+  color: #0066cc;
+  font-weight: 600;
+}
+.sniff-structure {
+  margin: 0;
+  padding-left: 20px;
+  line-height: 1.7;
+  font-size: 14px;
+}
+.sniff-transcript {
+  max-height: 220px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f6f7f9;
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.7;
+  font-family: inherit;
+  margin: 0;
+}
+.sniff-divider {
+  border-top: 1px dashed rgba(0, 0, 0, 0.12);
+}
+.sniff-rewrite-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(130px, 200px) 150px auto;
+  gap: 10px;
+  align-items: center;
+}
+.sniff-rewrite-row .app-select {
+  width: 100%;
+}
+@media (max-width: 980px) {
+  .sniff-niche-row,
+  .sniff-analysis-grid,
+  .sniff-rewrite-row {
+    grid-template-columns: 1fr;
+  }
+  .sniff-analysis-item.wide {
+    grid-column: auto;
+  }
+}
+
+/* ---------------- 工作台（agent 模式） ---------------- */
+/* 工作台与整屏分栏页：不再套大卡片（原来的四周内距 + 圆角白底四边全是死空间），
+   内容直接铺满顶到窗口边；分栏自己滚，才装得下一屏 */
+.content.is-workspace,
+.content.is-split {
+  padding: 0;
+  background: #fff;
+}
+.content.is-split {
+  overflow: hidden;
+}
+
+/* ---------------- 页面保活容器 ---------------- */
+/* 活动页：容器自己不产生盒子，页面按原来的布局参与 */
+.keep-alive {
+  display: contents;
+}
+/* 非活动页：整棵子树不占位、不渲染，但组件和 state 还在 */
+.keep-alive.is-hidden {
+  display: none;
+}
+
+.ws {
+  display: grid;
+  /*
+   * 布局：左任务栏 → 中对话框 → 右操作区（任务卡）。
+   * 中栏是对话，宽一点才聊得开；右栏操作区固定下限，任务卡参数摆得下。
+   * 左右两栏用 minmax 而不是固定值：窗口缩小时一起收，**不把操作区甩到下面一行**
+   * （窗口最小 880px，三栏最低 150+300+340=790 永远放得下）。
+   * 对话区还有 JS 侧的保底：窗口 <1100 时自动收起左栏（见 WorkspaceView 的 autoCollapsed）。
+   */
+  grid-template-columns: minmax(150px, 268px) minmax(300px, 1fr) minmax(340px, 520px);
+  /* 三栏贴合，区域之间靠分隔线划分，不留空隙 */
+  gap: 0;
+  align-items: stretch;
+  /* 工作台整屏高：操作区不跟着内容长，卡上的按钮才能钉在视线里 */
+  height: calc(100vh - var(--topnav-h));
+  min-height: 420px;
+  /* 不再是浮在灰底上的圆角卡片：直接铺满，靠分隔线划分区域 */
+  background: #fff;
+  overflow: hidden;
+}
+.ws-list,
+.ws-main,
+.ws-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 16px;
+  background: transparent;
+}
+/* 分隔线：中栏、右栏各在左边画一条 */
+.ws-main,
+.ws-chat {
+  border-left: 1px solid rgba(0, 0, 0, 0.06);
+}
+/* 左侧面板底色比内容区深一档（ZCode 式）：侧栏和内容一眼分清 */
+.ws-list,
+.split-list {
+  background: #f2f3f5;
+}
+/*
+ * 视觉顺序：任务列表(0) → 对话(1) → 操作区(2)。
+ * DOM 里对话写在整个工作台的后面，这里用 order 排到中间，结构不用搬家。
+ */
+.ws-chat {
+  order: 1;
+}
+.ws-main {
+  order: 2;
+}
+/* 任务栏收起：列表不渲染，对话占满剩余空间，操作区宽度不变 */
+.ws.list-closed {
+  grid-template-columns: minmax(300px, 1fr) minmax(340px, 520px);
+}
+/* 收起后对话栏是最左列，它画的那条左分隔线会贴在窗口边上，去掉 */
+.ws.list-closed .ws-chat {
+  border-left: none;
+}
+/* 操作区收起（顶部条右端的开关）：任务/对话两栏摊满；两栏都收时对话独占 */
+.ws.panel-closed {
+  grid-template-columns: minmax(150px, 268px) minmax(300px, 1fr);
+}
+.ws.list-closed.panel-closed {
+  grid-template-columns: minmax(300px, 1fr);
+}
+/*
+ * 操作区收起后对话区摊满整屏，行长读着累（ZCode 式）：
+ * 对话栏本身占满全宽（滚动条贴窗口最右边），内容列限宽 800 居中。
+ * 气泡滚动容器负外边距拉通到栏边缘，再用对称内边距把内容列居中；
+ * 输入区等其它块直接限宽居中。
+ */
+.ws.panel-closed .ws-chat {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  border-left: none;
+}
+.ws.panel-closed .ws-bubbles {
+  margin-inline: -16px;
+  padding-inline: max(16px, calc((100% - 800px) / 2));
+}
+.ws.panel-closed .ws-input,
+.ws.panel-closed .ws-input-foot,
+.ws.panel-closed .ws-hot-panel {
+  width: 100%;
+  max-width: 800px;
+  margin-inline: auto;
+}
+.ws.panel-closed .ws-list {
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
+}
+.ws.list-closed.panel-closed .ws-chat {
+  border-left: none;
+}
+/* 顶部条右端的面板开关：与系统按钮之间隔着保留区，悬停微亮 */
+.topnav-panel-toggle {
+  margin-left: auto;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #8e8e93;
+  cursor: pointer;
+  /* 顶条是拖拽区，按钮要单独解除 */
+  -webkit-app-region: no-drag;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.topnav-panel-toggle:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #1d1d1f;
+}
+/* 任务栏切换按钮：方形小图标按钮，平时不显眼 */
+/* 工作台页：品牌图标本身就是任务栏开关（ZCode 式）。
+   平时是宝螺 logo，悬浮盖上一层白底 + 收起图标，点一下切换左栏 */
+.topnav-brand-toggle {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  /* 顶条是拖拽区，按钮要单独解除 */
+  -webkit-app-region: no-drag;
+  transition: background 0.15s ease;
+}
+.topnav-brand-toggle:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+/* 非工作台页：图标只是 logo——不用原生 disabled（浏览器会给禁用按钮套降级样式把图标弄灰），
+   改用静态类：外观与普通 logo 完全一致，只是不可点、无悬浮态 */
+.topnav-brand-toggle.is-static {
+  cursor: default;
+}
+.topnav-brand-toggle.is-static:hover {
+  background: transparent;
+}
+.topnav-brand-toggle.is-static .topnav-brand-hover {
+  display: none;
+}
+.topnav-brand-logo {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+.topnav-brand-hover {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #fff;
+  color: #8e8e93;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.topnav-brand-toggle:hover .topnav-brand-hover {
+  opacity: 1;
+  color: #1d1d1f;
+}
+.ws-list-items {
+  /* 与 .split-items 同款：列表自己滚，条目再多也不把标题和底部入口顶走 */
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  /* 只竖着滚：横向溢出会把行尾的时间挤出可视区、还多一条滚动条 */
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+/* 任务卡可能比一屏长：中栏自己滚，别把整页顶下去 */
+.ws-main {
+  overflow-y: auto;
+}
+.ws-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ws-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.ws-head-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* 卡头这排（执行 / 成片 / 去细改 / 删除…）走轻量描边款：
+   无背景 + 细边框，尺寸再小一号——它们是卡上的高频小动作，
+   视觉权重该让给卡内容；主次靠颜色区分（执行/成片描蓝，其余描灰） */
+.ws-head-actions button.primary,
+.ws-head-actions button.secondary {
+  padding: 3px 10px;
+  font-size: 12px;
+  border-radius: 7px;
+  box-shadow: none;
+  background: transparent;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  color: #3a3a3c;
+}
+.ws-head-actions button.primary:hover:not(:disabled),
+.ws-head-actions button.secondary:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.04);
+}
+.ws-head-actions button.primary {
+  border-color: rgba(0, 122, 255, 0.5);
+  color: #0066d6;
+  font-weight: 500;
+}
+.ws-head-actions .ai-generate-button.compact {
+  padding: 2px 10px 2px 2px;
+  gap: 6px;
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid rgba(0, 122, 255, 0.5);
+  color: #0066d6;
+}
+.ws-head-actions .ai-generate-button.compact .ai-generate-icon {
+  width: 18px;
+  height: 18px;
+  font-size: 8px;
+  background: rgba(0, 122, 255, 0.14);
+  color: #0066d6;
+}
+.ws-badge {
+  font-size: 11px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: #f0f1f4;
+  color: #636366;
+  white-space: nowrap;
+}
+.ws-badge.running {
+  background: rgba(0, 122, 255, 0.12);
+  color: #0066d6;
+}
+.ws-badge.done {
+  background: rgba(52, 199, 89, 0.14);
+  color: #1a7f37;
+}
+.ws-badge.failed {
+  background: #ffe5e7;
+  color: #c20e2b;
+}
+
+.ws-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ws-step {
+  display: flex;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+.ws-step:first-child {
+  border-top: none;
+}
+.ws-dot {
+  flex-shrink: 0;
+  width: 16px;
+  font-size: 12px;
+  line-height: 20px;
+  color: #86868b;
+}
+.ws-step.is-done .ws-dot {
+  color: #1a7f37;
+}
+.ws-step.is-running .ws-dot {
+  color: #007aff;
+}
+.ws-step.is-failed .ws-dot {
+  color: #ff3b30;
+}
+.ws-step-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ws-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ws-step-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.ws-step-note {
+  font-size: 12px;
+  color: #86868b;
+}
+.ws-step-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+}
+
+/* 「用模板」下拉：跟步骤标题并排，所以只占一小段宽度（AppSelect 默认铺满） */
+.ws-tpl-pick {
+  width: 132px;
+  flex-shrink: 0;
+}
+.ws-tpl-pick .app-select-trigger {
+  padding: 5px 9px;
+  font-size: 13px;
+  border-radius: 8px;
+}
+
+.ws-params {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* 一行参数：行内再放不下才折行（显式分组见 paramRows） */
+.ws-param-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+}
+.ws-param {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+/* 标了 ownLine 的参数独占一行（如「选图 + 合成」里的解说员音色，别被镜头挤到同一行） */
+.ws-param.is-own-line {
+  flex-basis: 100%;
+}
+/* 行内参数的标签定宽：两行参数的控件起点对齐（画面 ↔ 语速），看着像表单的一列 */
+.ws-param:not(.is-textarea):not(.is-own-line) .ws-param-label {
+  width: 88px;
+}
+.ws-param-label {
+  color: #86868b;
+  white-space: nowrap;
+}
+.ws-param input {
+  height: 34px;
+  padding: 0 11px;
+  min-width: 180px;
+  font-size: 13px;
+  border-radius: 9px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #fff;
+  color: #1d1d1f;
+}
+/* 主题、链接这类文本要看得见内容，给宽一点 */
+.ws-param input[type="text"] {
+  min-width: 340px;
+}
+/* 秒数、百分比这类只填个位数，窄一点才不占地方 */
+.ws-param input[type="number"] {
+  min-width: 0;
+  width: 64px;
+}
+/* 选过图的参数：路径旁边挂一张缩略图，一眼看出选的是哪张 */
+.ws-param-thumb {
+  flex-shrink: 0;
+  width: 46px;
+  height: 34px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: #f2f2f7;
+  cursor: pointer;
+}
+/* 还没选图：占个同样大的虚线空框，行高不跳；点它跟点已选图一样弹选图 */
+.ws-param-thumb.is-empty {
+  border-style: dashed;
+  background: transparent;
+  cursor: pointer;
+}
+/* 图参数：图框在左、说明在后，说明自己吃掉剩下的宽度 */
+.ws-param.is-own-line .ws-param-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 文本域参数（主题 / 热点）：标签不抢宽度，框子铺满剩下的，行高给足三点 */
+.ws-param.is-textarea {
+  align-items: flex-start;
+}
+.ws-param.is-textarea .ws-param-label {
+  flex: 0 0 auto;
+  padding-top: 8px;
+}
+.ws-param textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 64px;
+  padding: 8px 11px;
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.5;
+  border-radius: 9px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #fff;
+  color: #1d1d1f;
+  resize: vertical;
+}
+.ws-param textarea::placeholder {
+  color: #86868b;
+}
+/* 「合成视频」的人物卡：左边图，右边音色 + 三根滑杆 */
+.ws-roles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ws-role {
+  /*
+   * 用 grid 而不是 flex：高度由右边那块（音色/音量/运镜/幅度）撑出来，
+   * 图框要"跟它等高且正方"，就得让**列宽在行高定了之后**再算——
+   * flex 里拉伸发生在尺寸计算之后，aspect-ratio 拿不到那个高度，列宽会算成 0（踩过）。
+   */
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 12px;
+}
+/*
+ * 图框：高度 = 行高（stretch 给），宽度 = 高度（aspect-ratio 反推）→ 正方形。
+ * 图片绝对定位：留在流里的话，原图尺寸会参与"这行多高"的计算，
+ * 一张大图能把整行撑爆（踩过：套上模板有图之后，图巨大）。
+ */
+.ws-role-pic {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  align-self: stretch;
+}
+.ws-role-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: #fff;
+  cursor: pointer;
+}
+.ws-role-img.is-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+  background: transparent;
+  color: #86868b;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.ws-role-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ws-role-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.ws-role-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ws-role-label {
+  flex-shrink: 0;
+  width: 30px;
+  font-size: 12.5px;
+  color: #86868b;
+}
+.ws-role-row input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+.ws-role-row .app-select {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+}
+/*
+ * 试听键走全站的 .speaker-btn（喇叭图标 + 播放时脉冲）。
+ * 高度不写死：靠 align-self: stretch 跟同一行的下拉/输入框齐平（那一行最高的就是它），
+ * 下拉的 padding 以后改了也不用回来同步这个数。
+ */
+.ws-role-row .speaker-btn {
+  align-self: stretch;
+  width: 36px;
+  height: auto;
+  border-radius: 10px;
+}
+.ws-role-value {
+  flex-shrink: 0;
+  width: 44px;
+  text-align: right;
+  font-size: 12px;
+  color: #86868b;
+}
+/* 拆解爆款的候选选题：一句提示 + 一排可点的选题 */
+.ws-topic-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 0;
+  /* 跟参数行的标签同号，别比别的标签大一圈 */
+  font-size: 12.5px;
+}
+.ws-topic-row .sniff-topic-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 报错条：右边挂个 ×，看完能随手关掉 */
+.ws-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.ws-error-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+.ws-error-close {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ws-error-close:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+/* 宽度档位：wide 给长音色名/较长数字留足宽度；narrow 给小数字 */
+.ws-param.is-wide .app-select {
+  width: 280px;
+  max-width: 100%;
+}
+.ws-param.is-wide input[type="number"] {
+  min-width: 280px;
+  width: 280px;
+}
+.ws-param.is-narrow input[type="number"] {
+  min-width: 90px;
+  width: 90px;
+}
+/* 下拉走 AppSelect（自定义弹层），尺寸收一收对齐旁边的输入框 */
+.ws-param .app-select {
+  max-width: 220px;
+}
+/* 独占一行的下拉（解说员音色）放宽些，长音色名不用截 */
+.ws-param.is-own-line .app-select {
+  width: 320px;
+  max-width: 100%;
+}
+.ws-param .app-select-trigger {
+  padding: 8px 11px;
+  font-size: 13px;
+  border-radius: 9px;
+}
+/* 选图那行的「选择」按钮也要跟上新的控件高度 */
+.ws-param .secondary {
+  height: 34px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+/* 步骤内联的产物（成片 / 文案报告）：贴在步骤体里，跟参数、说明同一列 */
+.ws-step-result {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+.ws-media {
+  width: 100%;
+  max-height: 340px;
+  border-radius: 12px;
+  background: #000;
+}
+/*
+ * 成片预览是一个固定 16:9 的横屏窗口：框子定死比例，视频用 contain 居中——
+ * 竖版成片两侧留黑，横版铺满，都不会把中间这一栏撑变形。
+ */
+.ws-stage {
+  width: 100%;
+  /* 别铺满中栏：预览是"确认一下对不对"，不是主画面，小一点不抢地方 */
+  max-width: 360px;
+  aspect-ratio: 16 / 9;
+  max-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: #000;
+  overflow: hidden;
+}
+.ws-stage .ws-media {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+  object-fit: contain;
+}
+
+/* 「脚本文案」块：标题左、行数右对齐，下面是可滚动的正文 */
+.ws-script-block {
+  display: flex;
+  flex-direction: column;
+}
+.ws-script-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.ws-script-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.ws-script-count {
+  font-size: 12px;
+  color: #86868b;
+}
+
+.ws-script {
+  margin: 0;
+  padding: 12px;
+  max-height: 300px;
+  overflow: auto;
+  border-radius: 12px;
+  background: #f7f8fa;
+  font-size: 12.5px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+.ws-chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 0;
+  background: #f5f5f7;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+.ws-chat-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  object-fit: cover;
+  display: block;
+}
+.ws-bubbles {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  /* 滚动条贴栏右边缘（ZCode 式）：容器拉通到 .ws-chat 的 16px 内边距外，内容用内边距补回来 */
+  margin-right: -16px;
+  padding-right: 16px;
+}
+/* 输入区与对话区右缘对齐：气泡内容右缘让位 8px 给滚动条，
+   输入区同样让 8px（不加负外边距，否则绝对定位的发送按钮会出界） */
+.ws-input,
+.ws-input-foot,
+.ws-hot-panel {
+  padding-right: 20px;
+}
+.ws-bubble {
+  padding: 9px 12px;
+  border-radius: 12px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+/* bot 回复行：头像在左、气泡在右（微信样式） */
+.ws-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.ws-row .ws-bubble.bot {
+  max-width: 92%;
+}
+.ws-row .ws-chat-avatar {
+  margin-top: 2px;
+}
+.ws-bubble.bot {
+  background: #f2f3f5;
+  color: #1d1d1f;
+}
+.ws-bubble.user {
+  align-self: flex-end;
+  max-width: 92%;
+  background: #007aff;
+  color: #fff;
+}
+.ws-chip {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #f7f8fa;
+  color: #1d1d1f;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+}
+.ws-chip:hover {
+  background: #eef0f3;
+}
+.ws-chip.active {
+  background: rgba(0, 122, 255, 0.12);
+  border-color: rgba(0, 122, 255, 0.35);
+  color: #0066d6;
+}
+.ws-mention {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+}
+.ws-mention-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #1d1d1f;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ws-mention-item.active {
+  background: rgba(0, 122, 255, 0.1);
+}
+.ws-mention-label {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.ws-mention-hint {
+  font-size: 11px;
+  color: #86868b;
+}
+.ws-hot-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: #f7f8fa;
+}
+.ws-hot-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ws-hot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  overflow: auto;
+}
+.ws-hot-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #1d1d1f;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.ws-hot-item:hover {
+  background: #eceef2;
+}
+.ws-hot-rank {
+  flex-shrink: 0;
+  width: 16px;
+  color: #86868b;
+  font-variant-numeric: tabular-nums;
+}
+.ws-hot-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-hot-heat {
+  flex-shrink: 0;
+  color: #86868b;
+  font-size: 11px;
+}
+/* 输入框上面那条：显式的「选热点」入口（藏在 @ 名单里不够显眼，而热榜已经不在卡上了） */
+.ws-input-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}.ws-input {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.ws-input textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 96px;
+  max-height: 240px;
+  /* 右边留出圆钮的位置，文字不会钻到按钮底下；左下同理留给「＋」加图按钮 */
+  padding: 12px 48px 34px 14px;
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.6;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #fff;
+  color: #1d1d1f;
+  resize: vertical;
+}
+.ws-send {
+  position: absolute;
+  right: 30px;
+  bottom: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: #007aff;
+  color: #fff;
+  cursor: pointer;
+}
+.ws-send:hover:not(:disabled) {
+  background: #0071e8;
+}
+.ws-send:disabled {
+  background: #d3d5da;
+  cursor: default;
+}
+
+
+
+
+
+/* 一键生图的阶段提示（镜头卡片标题行里，紧跟「待放图」） */
+.shot-gen-msg {
+  font-size: 12px;
+  color: #007aff;
+  margin-left: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+
+/*
+ * 设置 → AI 服务：服务商预设行。
+ * 一排小按钮当单选用；选中的那颗描边加亮（不用引入新的组件库）。
+ */
+.ai-provider-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ai-provider-row .secondary.small {
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 13px;
+}
+.ai-provider-row .ai-provider-active {
+  border-color: #007aff;
+  color: #007aff;
+  background: rgba(0, 122, 255, 0.08);
+}
+/*
+ * 「申请 Key」单独一行：url 很长，塞在预设按钮那行会把布局撑乱。
+ * form-row 第三列是 auto，这里只有两列内容 → 让链接占满剩余并允许断行。
+ */
+.ai-key-url {
+  grid-column: 2 / -1;
+  min-width: 0;
+  color: #007aff;
+  font-size: 13px;
+  word-break: break-all;
+}
+
+/* API Key 输入框后的帮助图标：点开展示获取 Key 的说明 */
+.key-help-icon {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.24);
+  background: transparent;
+  color: #6e6e73;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.key-help-icon:hover {
+  color: #1d1d1f;
+  border-color: rgba(0, 0, 0, 0.4);
+}
+
+/* ---------------- 删除确认框（ConfirmDialog） ---------------- */
+.confirm-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 80; /* 高过顶条(30) */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.28);
+  animation: confirm-in 0.14s ease-out;
+}
+@keyframes confirm-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.confirm-box {
+  width: min(340px, calc(100vw - 48px));
+  background: #fff;
+  border-radius: 14px;
+  padding: 16px 18px 14px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
+  animation: confirm-pop 0.14s ease-out;
+}
+@keyframes confirm-pop {
+  from { transform: scale(0.96); opacity: 0.6; }
+  to { transform: scale(1); opacity: 1; }
+}
+.confirm-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1d1d1f;
+  line-height: 1.5;
+  word-break: break-all;
+}
+.confirm-detail {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #86868b;
+  line-height: 1.6;
+}
+.confirm-actions {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---------------- 对话输入区：＋ 加图按钮与附件缩略图 ---------------- */
+/* 左下角的＋：与右下角的发送圆钮对称 */
+.ws-attach-add {
+  position: absolute;
+  left: 9px;
+  bottom: 9px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 50%;
+  background: #fff;
+  color: #636366;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.ws-attach-add:hover {
+  color: #0066d6;
+  border-color: rgba(0, 122, 255, 0.5);
+}
+/* 待发送的附图条：小缩略图，悬浮出移除 ✕ */
+.ws-attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ws-attach-thumb {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  flex-shrink: 0;
+}
+.ws-attach-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.ws-attach-remove {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 0 0 0 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 9px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.ws-attach-thumb:hover .ws-attach-remove {
+  opacity: 1;
+}
+/* 气泡里的附图回显 */
+.ws-bubble-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.ws-bubble-images img {
+  max-width: 140px;
+  max-height: 100px;
+  border-radius: 8px;
+  object-fit: cover;
+  display: block;
+}
+
+/* ---------------- 真人解说：镜头录音条 ---------------- */
+/* 扁平行（跟音色/运镜同一节奏），高度由 .shot-inline-row 的 min-height 统一，切换不跳 */
+/* 迷你播放条：整条可点（播放/暂停），里面是 播放键 + 进度轨 + 时长 */
+.shot-rec-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  /* 长度跟下面「运镜」下拉一致（同一个宽度变量）：两行的控件右缘对齐 */
+  flex: 0 1 var(--shot-select-w, 320px);
+  min-width: 150px;
+  /* 高度/圆角跟音色下拉一致（14px 字 + 8px 内距 ≈ 36px），切换模式时行内控件不参差 */
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 12px;
+  background: #fff;
+  color: #636366;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.shot-rec-bar:hover:not(:disabled) {
+  background: #f7f8fa;
+  border-color: rgba(0, 0, 0, 0.2);
+}
+.shot-rec-bar:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.shot-rec-play {
+  flex-shrink: 0;
+  font-size: 10px;
+  letter-spacing: -1px;
+  width: 12px;
+  text-align: center;
+}
+.shot-rec-track {
+  position: relative;
+  flex: 1;
+  min-width: 40px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+.shot-rec-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  border-radius: 999px;
+  background: #007aff;
+  transition: width 0.15s linear;
+}
+/* 时长：跟在播放条后面 */
+.shot-rec-dur {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #636366;
+}
+.shot-rec-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.shot-rec-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: #c20e2b;
+}
+.shot-rec-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ff3b30;
+  flex-shrink: 0;
+  animation: shot-rec-pulse 1.1s ease-in-out infinite;
+}
+@keyframes shot-rec-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+/* 「解说词 / 字幕」标题右侧的声音模式单选：录音 / 合成，选哪个显示哪一行 */
+.shot-audio-mode {
+  display: inline-flex;
+  gap: 4px;
+  padding: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 9px;
+  background: #f2f3f5;
+}
+.shot-audio-mode-btn {
+  padding: 3px 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: #636366;
+  font-size: 12px;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.shot-audio-mode-btn:hover:not(.active) {
+  color: #1d1d1f;
+}
+.shot-audio-mode-btn.active {
+  background: #fff;
+  color: #0066d6;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* 右区顶部的页名：跟 .view > h2 同款（.split-work 不是 .view 的直接子级，选不中那条） */
+.split-work > .work-title {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  margin: 0 0 14px 0;
+}
+
+/* ---------------- 内置模板卡片（应用自带，只能用不能改） ---------------- */
+.tpl-card-builtin {
+  /* 跟用户模板区分：淡蓝底 + 左边一条强调线 */
+  background: rgba(0, 122, 255, 0.045);
+  border-color: rgba(0, 122, 255, 0.2);
+}
+/* 内置模板的名字是只读的：长得像标题，不是输入框 */
+.tpl-card-name.is-static {
+  display: inline-block;
+  width: auto;
+  padding: 2px 4px;
+  cursor: default;
+}
+.tpl-default-chip.is-builtin {
+  color: #0066d6;
+  background: rgba(0, 122, 255, 0.14);
+}
