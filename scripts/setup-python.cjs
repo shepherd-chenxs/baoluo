@@ -24,12 +24,14 @@ const ASSET = `cpython-${PY_VERSION}%2B${PY_RELEASE}-x86_64-pc-windows-msvc-inst
 const GH_PATH = `astral-sh/python-build-standalone/releases/download/${PY_RELEASE}/${ASSET}`;
 
 // 国内镜像依次尝试（实测 ghfast.top 最快），最后一个直连 GitHub 兜底
-const DOWNLOAD_URLS = [
+// 可用 PY_DOWNLOAD_URL 覆盖下载地址（CI 里指直连，跳过国内代理）
+const PY_DOWNLOAD_URLS = [
+  process.env.PY_DOWNLOAD_URL,
   `https://ghfast.top/https://github.com/${GH_PATH}`,
   `https://gh-proxy.com/https://github.com/${GH_PATH}`,
   `https://ghproxy.net/https://github.com/${GH_PATH}`,
   `https://github.com/${GH_PATH}`,
-];
+].filter(Boolean);
 
 /** 解压后是 resources/python/（tar 包里本身带一层 python/） */
 const EXTRACT_DIR = path.join(__dirname, "..", "resources");
@@ -278,7 +280,7 @@ async function main() {
     const tarPath = path.join(EXTRACT_DIR, ASSET.replace("%2B", "+"));
 
     let downloaded = false;
-    for (const url of DOWNLOAD_URLS) {
+    for (const url of PY_DOWNLOAD_URLS) {
       log(`下载 ${url}`);
       try {
         await download(url, tarPath);
@@ -298,7 +300,7 @@ async function main() {
       console.error("  请手动下载并解压到：");
       console.error(`  ${EXTRACT_DIR}（解压后应有 python\\python.exe）`);
       console.error("");
-      console.error(`  ${DOWNLOAD_URLS[0]}`);
+      console.error(`  ${PY_DOWNLOAD_URLS[0]}`);
       console.error("============================================");
       console.error("");
       // 不阻塞安装：运行时缺失时软件会给出明确提示

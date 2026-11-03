@@ -19,10 +19,14 @@ const zlib = require("node:zlib");
 const WHISPER_VERSION = "v1.9.1";
 const TARGET_DIR = path.join(__dirname, "..", "resources", "whisper");
 
-// 只走 ghproxy 国内代理，不直连 GitHub
+// 国内优先走代理；代理不可用时直连 GitHub 兜底（CI 与海外网络走这条）
+const WHISPER_BIN_URL = `https://github.com/ggml-org/whisper.cpp/releases/download/${WHISPER_VERSION}/whisper-blas-bin-x64.zip`;
 const DOWNLOAD_URLS = [
-  `https://ghproxy.net/https://github.com/ggml-org/whisper.cpp/releases/download/${WHISPER_VERSION}/whisper-blas-bin-x64.zip`,
-];
+  // 显式指定时优先用（CI 里指直连，避免绕道国内代理）
+  process.env.WHISPER_DOWNLOAD_URL,
+  `https://ghproxy.net/${WHISPER_BIN_URL}`,
+  WHISPER_BIN_URL,
+].filter(Boolean);
 
 // 需要校验的关键文件，用来判断是否已就绪
 const CHECK_FILE = path.join(TARGET_DIR, "Release", "whisper-cli.exe");

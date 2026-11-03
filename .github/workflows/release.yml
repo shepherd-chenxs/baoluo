@@ -1,0 +1,84 @@
+name: Release
+
+# 打 tag（v0.9.1 这种）就自动编译 Windows 安装包，并传到 Release 页面供下载。
+# 也可以手动触发：Actions 页面 → Release → Run workflow。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# 上传安装包到 Release 需要写权限
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: 构建 Windows 安装包
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      # postinstall 会顺带做三件事：
+      #   1. 下载 whisper.cpp 二进制 → resources/whisper
+      #   2. 下载便携版 Python → resources/python（不随包分发，仅用于编译轮子）
+      #   3. 编译 jieba_fast 轮子 → resources/wheels
+      # GitHub 的机器在海外，所以把下载地址指向 GitHub 直连，跳过国内代理。
+      - name: 安装依赖
+        run: npm ci
+        env:
+          WHISPER_DOWNLOAD_URL: https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.1/whisper-blas-bin-x64.zip
+          PY_DOWNLOAD_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.10.21%2B20260901-x86_64-pc-windows-msvc-install_only.tar.gz
+
+      # 缺 whisper 二进制的话，装出来的软件「文案提取」直接不可用，必须拦下
+      - name: 校验打包资源
+        shell: pwsh
+        run: |
+          $whisper = "resources/whisper/Release/whisper-cli.exe"
+          if (-not (Test-Path $whisper)) {
+            throw "缺少 whisper 二进制：$whisper —— 检查 npm ci 日志里 setup-whisper 的输出"
+          }
+          $wheels = Get-ChildItem resources/wheels -Filter *.whl -ErrorAction SilentlyContinue
+          if (-not $wheels) {
+            Write-Host "::warning::未生成 jieba_fast 轮子，安装包里的声音克隆首次使用会失败"
+          }
+          $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tag = "${{ github.ref_name }}".TrimStart("v")
+          if ("${{ github.ref_type }}" -eq "tag" -and $tag -ne $pkg) {
+            Write-Host "::warning::tag 是 $tag，但 package.json 里是 $pkg，安装包版本号会取后者"
+          }
+          Write-Host "版本 $pkg，资源校验通过"
+
+      - name: 编译（tsc + vite）
+        run: npm run build
+
+      - name: 打包安装包
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: baoluo-windows-x64
+          path: release/*.exe
+          retention-days: 14
+
+      - name: 发布到 Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.exe
+          generate_release_notes: true
+          fail_on_unmatched_files: true
