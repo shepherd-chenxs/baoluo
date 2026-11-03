@@ -214,7 +214,7 @@ scripts/e2e-dialogue.cjs —— 跑完整 parse→tts→compose 端到端，给�
 
 ## 免责声明
 
-本项目以 MIT 协议开源，仅供个人学习与本地备份用途。使用者对自己的行为承担全部责任：
+本项目以 MIT 协议授权，以下为使用须知，**不构成对 MIT 授权条款的额外限制**。使用者对自己的行为承担全部责任：
 
 - **素材来源**：请遵守各内容平台（抖音、B 站等）的服务条款与 `robots` 约定，勿抓取、搬运、分发未经授权的内容。
 - **声音与肖像**：语音克隆、变声功能只能用于自己拥有权利或已获明确授权的声音；用他人声音制作、传播内容在多地已有判例风险，责任由使用者自负。
@@ -223,4 +223,8 @@ scripts/e2e-dialogue.cjs —— 跑完整 parse→tts→compose 端到端，给�
 
 ## 许可证
 
-[MIT](LICENSE)
+本项目自有代码以 [MIT](LICENSE) 授权，Copyright (c) 2026 宝螺 / Baoluo contributors。
+
+第三方组件的许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。其中需要留意的是：
+**安装包内含以 GPL-3.0-or-later 分发的 FFmpeg 可执行文件**（独立进程调用，未修改），
+分发安装包时须一并提供其许可与源码获取地址，详见该文件的第三节。
