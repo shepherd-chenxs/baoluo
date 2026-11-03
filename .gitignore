@@ -1,0 +1,84 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+release/
+__tsc_out__/
+
+# Temp files
+tmp/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# TypeScript
+*.tsbuildinfo
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+
+# Coverage
+coverage/
+
+# Electron-builder artifacts
+*.blockmap
+
+# 图标调试预览（生成物，不入库）
+build/icon-preview.png
+
+# whisper.cpp pre-built binaries (downloaded by postinstall)
+resources/whisper/
+# 便携版 Python 运行时 + 预装依赖（由 postinstall 的 setup-python.cjs 生成，不入库）
+resources/python/
+# 预编译依赖轮子（由 setup-python.cjs 生成，随安装包分发，不入库）
+resources/wheels/
+# Local environment / setup files
+PATH.txt
+settings.txt
+
+# electron-builder 本地缓存
+.electron-cache/
+.electron-builder-cache/
+
+# 权限诊断临时输出（外部工具生成，含其他仓库绝对路径，不入库）
+.bandi/acl-out/
+
+# ===== 开源隔离：以下仅留在本地，不得入库 =====
+# 内部排期/开发/测试文档（含本机绝对路径与真机环境细节）
+docs/项目文档-by班底/
+# 内部工具产物与工作台配置
+.bandi/
+.zcodeignore
+# 本机工作区数据（AI 助手记忆、缓存，属本地）
+.workbuddy/
+# 运行期产物：登录态 cookie（tmp/ 见上方）
+cookies/
+# 证书与私钥
+*.pem
+*.p12
+*.pfx
+*.key
+*.cer
+*.crt
+# 环境变量（保留示例文件）
+.env.*
+!.env.example
+# 本机设置（含 API Key 明文，绝不入库）
+settings.json
+dialogue-settings.json
