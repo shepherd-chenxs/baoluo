@@ -104,13 +104,26 @@
   RMDir /r "$LOCALAPPDATA\baoluo-updater"
   RMDir /r "$LOCALAPPDATA\bee-updater"
   RMDir /r "$LOCALAPPDATA\Baoluo"
-  ; 默认数据目录（模型/运行时）现在在 C:\Baoluo\data
-  RMDir /r "$PROFILE\Baoluo\data"
+  ; 老版本（v0.9.x）的默认数据目录写在 C:\Baoluo\data，升级过的用户可能还留着
+  RMDir /r "C:\Baoluo\data"
 
   ; 用户可能把数据目录改到了别的盘（设置 → 通用设置 → 数据目录），
   ; 指针文件里记着路径，这里一并清掉，避免卸载后残留几 GB。
   ClearErrors
   FileOpen $R2 "$APPDATA\Baoluo\data-root.txt" r
+  ${IfNot} ${Errors}
+    FileRead $R2 $R3
+    FileClose $R2
+    ${TrimNewLines} "$R3" $R3
+    ${If} $R3 != ""
+      DetailPrint "正在清除自定义数据目录：$R3"
+      RMDir /r "$R3"
+    ${EndIf}
+  ${EndIf}
+
+  ; 老版本的指针文件在 C:\Baoluo\data 下，同样要认
+  ClearErrors
+  FileOpen $R2 "C:\Baoluo\data\data-root.txt" r
   ${IfNot} ${Errors}
     FileRead $R2 $R3
     FileClose $R2

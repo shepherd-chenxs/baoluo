@@ -1,7 +1,7 @@
 /**
  * 剧本：把「一句话 → 任务卡」这一步定死。
  *
- * 这三条流程是固定的（下载+文案、对话视频、变声），所以直接硬编码，
+ * 这些流程是固定的（下载+文案、对话视频、语音识别），所以直接硬编码，
  * 执行时完全不经过模型——省 token 的大头就在这里，不是靠提示词优化。
  */
 import type {
@@ -367,21 +367,6 @@ function transcribeAnyStep(inputPath: string): AgentStep {
   };
 }
 
-function voiceConvertStep(inputPath: string): AgentStep {
-  const dw = settings.getSettings();
-  return {
-    id: "s1",
-    kind: "voice-convert",
-    title: "换音色重念",
-    status: "pending",
-    params: [
-      { key: "inputPath", label: "源文件", value: inputPath, type: "file" },
-      { key: "voice", label: "目标音色", value: dw.voiceNarrator, type: "select", options: voiceOptions() },
-      { key: "rate", label: "语速(%)", value: "0", type: "number" },
-    ],
-  };
-}
-
 /** 意图 + 参数 → 步骤列表 */
 export function buildSteps(parse: AgentParseResult): AgentStep[] {
   const link = parse.params.link ?? "";
@@ -428,9 +413,6 @@ export function buildSteps(parse: AgentParseResult): AgentStep[] {
       }
       // 主题/热点 → 任务卡里内嵌分镜工作台（跟「热点成片」页同一套）
       return [hotStoryStep("s1", topic)];
-
-    case "voice-convert":
-      return [voiceConvertStep(parse.params.inputPath ?? "")];
 
     case "tts":
       return [ttsStep(parse.params.text ?? topic)];
@@ -487,4 +469,16 @@ export function createTask(instruction: string, hot?: HotItem | null): AgentCrea
 export async function createTaskSmart(instruction: string, hot?: HotItem | null): Promise<AgentCreateResult> {
   const parse = await parseInstructionSmart(instruction);
   return taskFromParse(instruction, parse, hot);
+}
+
+/**
+ * 运行时（设置 → 运行时）给出的计划 → 任务卡。
+ *
+ * 计划本身已经过 `resultForIntent` 校验（缺输入会返回 unknown），所以这里不再兜底：
+ * 走到这一步就该建出卡来，建不出来说明上游传了脏数据，直接报错更利于排查。
+ */
+export function createTaskFromPlan(instruction: string, parse: AgentParseResult): AgentTask {
+  const { task } = taskFromParse(instruction, parse, null);
+  if (!task) throw new Error("这条计划没法定成任务卡（意图未知）。");
+  return task;
 }

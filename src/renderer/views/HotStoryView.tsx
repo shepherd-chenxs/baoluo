@@ -9,12 +9,11 @@
  * 打开方案走工作台的命令式句柄，不用换 key 重挂组件——重挂会把正在跑的 AI 成片打断。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
 import type { StoryboardApi } from "../../preload";
 import type { StoryboardSummary } from "../../shared/storyboard-types";
 import { usePageActive } from "../components/KeepAlive";
 import { useConfirm } from "../components/ConfirmDialog";
-import SideList, { SideRow, formatListTime } from "../components/SideList";
+import SideList, { ListAddButton, SideRow, formatListTime } from "../components/SideList";
 import HotStoryWorkbench, {
   type HotStoryWorkbenchHandle,
 } from "../components/hot-story/HotStoryWorkbench";
@@ -26,8 +25,6 @@ declare global {
 }
 
 interface HotStoryViewProps {
-  /** 左栏顶部的导航块（App 传下来的 SideNav） */
-  nav?: ReactNode;
   /** 确保豆包面板打开（生图需要登录时，工作台会叫它） */
   onOpenDoubao?: () => void;
   /** 从工作台「去细改」带过来的方案：切到本页后自动打开它 */
@@ -37,7 +34,6 @@ interface HotStoryViewProps {
 }
 
 export default function HotStoryView({
-  nav,
   onOpenDoubao,
   openBoardId,
   onOpenBoardConsumed,
@@ -105,27 +101,17 @@ export default function HotStoryView({
   }
 
   return (
-    /* 整屏分左右两区（骨架与另外三页共用，见 SideList 组件） */
+    /* 左栏是方案列表（与图文解说的记录栏同款，挪回左边），右区是编辑器 */
     <div className="view story-view">
       <SideList
-        nav={nav}
         section="方案"
         action={
-          <button
-            type="button"
-            className="secondary small"
+          <ListAddButton
             onClick={() => workbenchRef.current?.startFresh()}
             title="开一份新的（不动已有方案）"
-          >
-            ＋ 新建
-          </button>
+          />
         }
         hasItems={boards.length > 0}
-        empty={
-          <>
-            还没有方案。右边选一条热点（或填个主题）点「成片」，生成的方案会自动出现在这里。
-          </>
-        }
         items={boards.map((b) => (
           <SideRow
             key={b.id}
@@ -144,8 +130,9 @@ export default function HotStoryView({
             deleteLabel={`删除方案 ${b.title}`}
           />
         ))}
+        empty={<>还没有方案。在右边选一条热点（或填个主题）点「成片」，生成的方案会自动出现在这里。</>}
       >
-        {/* 页名放右区顶部（跟其他内容页一致）；左栏只留导航 + 方案列表 */}
+        {/* 页名放编辑区顶部；方案列表在左栏 */}
         <h2 className="work-title">热点成片</h2>
         <HotStoryWorkbench
           active={pageActive}

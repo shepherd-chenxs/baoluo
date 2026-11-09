@@ -1,34 +1,26 @@
 /**
  * Edge TTS 音色选项（语音合成页与对话视频页共用）。
- * 微软 Edge TTS 服务支持 400+ 音色，这里列出常用中文（含方言/台粤）
- * 与常用外语。想用列表外的音色，可在语音合成页填「自定义音色 ID」。
+ * 微软 Edge TTS 服务支持 400+ 音色，这里只列出实际会用到的：中文（含方言/台粤）
+ * 与日韩；英文音色已下线，需要时按文件里的注释加回来。
  */
 export const VOICE_OPTIONS: Array<{ value: string; label: string }> = [
   // ---- 普通话：男声 ----
+  // 只留真正用得上的几个（云希/云扬/云健/云夏）。
+  // 已下线：云枫 YunfengNeural、云浩 YunhaoNeural、云野 YunyeNeural、
+  //        云杰 YunjieNeural、云泽 YunzeNeural —— 需要用就照这个格式加回来。
   { value: "zh-CN-YunxiNeural", label: "男·云希 (沉稳)" },
   { value: "zh-CN-YunyangNeural", label: "男·云扬 (新闻风)" },
   { value: "zh-CN-YunjianNeural", label: "男·云健 (运动风)" },
-  { value: "zh-CN-YunfengNeural", label: "男·云枫 (活力)" },
-  { value: "zh-CN-YunhaoNeural", label: "男·云浩 (温暖)" },
   { value: "zh-CN-YunxiaNeural", label: "男·云夏 (活泼童声)" },
-  { value: "zh-CN-YunyeNeural", label: "男·云野 (阳光)" },
-  { value: "zh-CN-YunjieNeural", label: "男·云杰 (阳刚)" },
-  { value: "zh-CN-YunzeNeural", label: "男·云泽 (激昂)" },
 
   // ---- 普通话：女声 ----
+  // 只留真正用得上的几个（晓晓/晓伊/晓萱）。
+  // 已下线：晓辰 XiaochenNeural、晓涵 XiaohanNeural、晓梦 XiaomengNeural、晓墨 XiaomoNeural、
+  //        晓秋 XiaoqiuNeural、晓睿 XiaoruiNeural、晓双 XiaoshuangNeural、晓颜 XiaoyanNeural、
+  //        晓悠 XiaoyouNeural、晓甄 XiaozhenNeural —— 需要用就照这个格式加回来。
   { value: "zh-CN-XiaoxiaoNeural", label: "女·晓晓 (温暖)" },
   { value: "zh-CN-XiaoyiNeural", label: "女·晓伊 (活泼)" },
-  { value: "zh-CN-XiaochenNeural", label: "女·晓辰 (平静)" },
-  { value: "zh-CN-XiaohanNeural", label: "女·晓涵 (温柔)" },
-  { value: "zh-CN-XiaomengNeural", label: "女·晓梦 (开朗)" },
-  { value: "zh-CN-XiaomoNeural", label: "女·晓墨 (成熟)" },
-  { value: "zh-CN-XiaoqiuNeural", label: "女·晓秋 (舒缓)" },
-  { value: "zh-CN-XiaoruiNeural", label: "女·晓睿 (老年)" },
-  { value: "zh-CN-XiaoshuangNeural", label: "女·晓双 (童声)" },
   { value: "zh-CN-XiaoxuanNeural", label: "女·晓萱 (甜美)" },
-  { value: "zh-CN-XiaoyanNeural", label: "女·晓颜 (温柔)" },
-  { value: "zh-CN-XiaoyouNeural", label: "女·晓悠 (温暖)" },
-  { value: "zh-CN-XiaozhenNeural", label: "女·晓甄 (温和)" },
 
   // ---- 方言 ----
   { value: "zh-CN-liaoning-XiaobeiNeural", label: "东北·晓蓓 (辽宁话)" },
@@ -45,17 +37,10 @@ export const VOICE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "zh-HK-WanLungNeural", label: "粤·雲龍 (男)" },
 
   // ---- 英语 ----
-  { value: "en-US-AriaNeural", label: "美音·Aria (女)" },
-  { value: "en-US-JennyNeural", label: "美音·Jenny (女)" },
-  { value: "en-US-MichelleNeural", label: "美音·Michelle (女)" },
-  { value: "en-US-GuyNeural", label: "美音·Guy (男)" },
-  { value: "en-US-ChristopherNeural", label: "美音·Christopher (男)" },
-  { value: "en-US-EricNeural", label: "美音·Eric (男)" },
-  { value: "en-GB-SoniaNeural", label: "英音·Sonia (女)" },
-  { value: "en-GB-LibbyNeural", label: "英音·Libby (女)" },
-  { value: "en-GB-RyanNeural", label: "英音·Ryan (男)" },
-  { value: "en-AU-NatashaNeural", label: "澳音·Natasha (女)" },
-  { value: "en-AU-WilliamNeural", label: "澳音·William (男)" },
+  // 已按需求下线（界面不列英文音色）。需要时把下面几条加回来即可：
+  //   en-US-AriaNeural / JennyNeural / MichelleNeural / GuyNeural / ChristopherNeural / EricNeural
+  //   en-GB-SoniaNeural / LibbyNeural / RyanNeural
+  //   en-AU-NatashaNeural / WilliamNeural
 
   // ---- 日语 ----
   { value: "ja-JP-NanamiNeural", label: "日·Nanami (女)" },

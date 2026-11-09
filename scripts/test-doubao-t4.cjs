@@ -319,8 +319,9 @@ function humanReadable(msg) {
     } else {
       process.env.BAOLUO_DOUBAO_URL = url;
       /*
-       * 面板视图可能在前面的用例里被换成了后台 worker（prepareDoubaoHidden 会销毁它）。
-       * 先要回面板视图再重载，否则下面按 contentView.children 取页面会取到 undefined。
+       * 豆包窗口可能在前面的用例里被换成了后台 worker（prepareDoubaoHidden 会销毁它）。
+       * 先把独立豆包窗口要回来再重载，否则下面找窗口会找到 undefined。
+       * （v1.0.0 起豆包是独立 BrowserWindow：主窗口之外的那个就是它）
        */
       doubao.setDoubaoVisible(win, true);
       doubao.setDoubaoBounds({ x: 0, y: 46, width: 800, height: 700 });
@@ -329,7 +330,7 @@ function humanReadable(msg) {
     }
     const ready = await waitFor(() => doubao.getDoubaoState().status === "ready", 20000);
     if (!ready) throw new Error(`替身页面没加载完（mode=${mode}）：${doubao.getDoubaoState().message}`);
-    return win.contentView.children.find((v) => v.webContents).webContents;
+    return BrowserWindow.getAllWindows().find((w) => w !== win && !w.isDestroyed()).webContents;
   }
 
   // ---- 标准 2）未登录：提示「请先登录豆包」，且一次都没填词 ----
@@ -458,8 +459,8 @@ function humanReadable(msg) {
       `${bytes.length} 字节`
     );
     check(/\.png$/.test(bound.imagePath || ""), "扩展名按字节魔数落成 .png", path.extname(bound.imagePath || ""));
-    const trusted = await win.contentView.children
-      .find((v) => v.webContents)
+    const trusted = await BrowserWindow.getAllWindows()
+      .find((w) => w !== win && !w.isDestroyed())
       .webContents.executeJavaScript(`window.__sendTrusted`, true);
     check(
       trusted === true,

@@ -1,14 +1,12 @@
 /**
- * 「写对话脚本」这一步：拿主题（或一段现成文案）让当前配置的大模型写成双人对话。
+ * 「写对话脚本」这一步：拿主题（或一段现成文案）让模型写成双人对话。
  *
- * 这是整条工作流里**唯一**要花 token 的地方——其他步骤都是确定性代码。
+ * 模型走 `llm`：应用了运行时就用运行时，否则退回「设置 → AI 服务」。
  * 提示词沿用老 laodeng 那套：甲方问、乙方答，短句、能念得顺。
  */
-import { net } from "electron";
-import { withNetworkRetry } from "../net-retry";
-import * as settings from "../dialogue/settings";
+import { llmComplete } from "../llm";
 
-const REQUEST_TIMEOUT_MS = 120_000;
+const REQUEST_TIMEOUT_MS = 180_000;
 
 export interface DialogueScriptRequest {
   /** 主题，如「事业运」；给了 transcript 时可以只当补充说明 */
@@ -74,11 +72,6 @@ export function normalizeScript(raw: string): string {
 }
 
 export async function writeDialogueScript(req: DialogueScriptRequest): Promise<string> {
-  const s = settings.getSettings();
-  if (!s.apiKey?.trim()) {
-    throw new Error("还没配置 AI 服务（API Key），请先到「设置 → AI 服务」填写。");
-  }
-  const base = (s.baseUrl || "https://api.deepseek.com/v1").replace(/\/+$/, "");
   const duration = req.durationSeconds && req.durationSeconds > 0 ? Math.round(req.durationSeconds) : 45;
   const { lines } = scriptLengthFor(duration);
 
@@ -92,54 +85,16 @@ export async function writeDialogueScript(req: DialogueScriptRequest): Promise<s
     .filter(Boolean)
     .join("\n");
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    const res = await withNetworkRetry(undefined, () =>
-      net.fetch(base + "/chat/completions", {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${s.apiKey.trim()}`,
-        },
-        body: JSON.stringify({
-          model: s.model || "deepseek-chat",
-          messages: [
-            { role: "system", content: systemPrompt(duration) },
-            { role: "user", content: userText },
-          ],
-          temperature: 1.0,
-          // 行数多时别让输出被截在半句上：每行留 40 token，再给点余量
-          max_tokens: Math.min(4000, 200 + lines * 40),
-          stream: false,
-        }),
-      })
-    );
-    if (!res.ok) {
-      let detail = "";
-      try {
-        const err = (await res.json()) as { error?: { message?: string } };
-        detail = err?.error?.message ?? "";
-      } catch {
-        /* 拿不到细节就用状态码 */
-      }
-      if (res.status === 401) throw new Error("AI 服务鉴权失败（Key 无效，或这个服务商不需要 Key），请到「设置 → AI 服务」检查。");
-      throw new Error(`写脚本失败（HTTP ${res.status}）${detail ? "：" + detail : ""}`);
-    }
-    const data = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string | null; reasoning_content?: string | null } }>;
-    };
-    const raw = data.choices?.[0]?.message ?? {};
-    const script = normalizeScript(String(raw.content ?? "").trim() || String(raw.reasoning_content ?? ""));
-    if (!script) throw new Error("AI 没有返回内容，再点一次「重写」试试。");
-    return script;
-  } catch (e: unknown) {
-    if (e instanceof Error && e.name === "AbortError") {
-      throw new Error("写脚本超时了（超过 2 分钟），检查一下网络再试。");
-    }
-    throw e;
-  } finally {
-    clearTimeout(timer);
-  }
+  const raw = await llmComplete({
+    system: systemPrompt(duration),
+    user: userText,
+    temperature: 1.0,
+    // 行数多时别让输出被截在半句上：每行留 40 token，再给点余量
+    maxTokens: Math.min(4000, 200 + lines * 40),
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    label: "写对话脚本",
+  });
+  const script = normalizeScript(raw);
+  if (!script) throw new Error("模型没有返回内容，再点一次「重写」试试。");
+  return script;
 }

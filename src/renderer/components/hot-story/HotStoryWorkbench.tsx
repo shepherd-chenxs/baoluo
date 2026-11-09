@@ -13,6 +13,7 @@ import type {
   DialogueApi,
   DoubaoApi,
   ImageApi,
+  LlmApi,
   MediaApi,
   SettingsApi,
   StoryboardApi,
@@ -24,6 +25,7 @@ import type {
   MotionMode,
   VideoResolution,
 } from "../../../shared/dialogue-types";
+import type { LlmRoute } from "../../../shared/llm-types";
 import type {
   HotItem,
   HotSource,
@@ -35,6 +37,7 @@ import { formatHeat } from "../../../shared/hot-format";
 import { effectiveFavoriteVoices, VOICE_OPTIONS } from "../../../shared/voices";
 import type { BatchState } from "../../../shared/doubao-batch-types";
 import type { ImageProviderInfo } from "../../../shared/image-providers";
+import { stripIpc } from "../../lib/err-text";
 import {
   runHotPipeline,
   shouldReuseStoryboard,
@@ -52,6 +55,8 @@ declare global {
     settings: SettingsApi;
     doubao: DoubaoApi;
     image: ImageApi;
+    /** 文案/分镜由谁写（运行时优先） */
+    llm: LlmApi;
   }
 }
 
@@ -186,11 +191,38 @@ export interface PipelineButtonState {
   running: boolean;
   /** 停下来等用户时还缺几张图（0 = 不缺） */
   missing: number;
+  /**
+   * 下面是「进度播报」用的：宿主（工作台对话区）靠它把"跑到哪一步了"说给用户，
+   * 用户不用盯着右边的面板。没跑过时 stage / message 都是 null。
+   */
+  stage: PipelineStage | null;
+  message: string | null;
+  /** 流水线这一轮的状态（没跑过是 null） */
+  status: PipelineStatus | null;
+  /** 这一轮的成片路径（跑到一半 / 失败时是 null） */
+  outputPath: string | null;
+  /** 这一轮结束了（出片、停在等图、出错、被中止都算）——宿主据此只发一次"结果" */
+  finished: boolean;
+}
+
+/** 自动开跑（托管）时额外传的选项 */
+export interface RunPipelineOptions {
+  /**
+   * 沿用现有分镜、不重写（跑过一轮、只是重试缺图时用）。
+   */
+  skipStory?: boolean;
+  /**
+   * 已经确认过，别再弹"现在开始吗"。
+   *
+   * 工作台对话区是"说一句话就自己出片"，建卡后由宿主直接开跑；
+   * 这时再弹一个确认框，就等于要用户点两下 —— 和"我只想要结果"矛盾。
+   */
+  confirmed?: boolean;
 }
 
 /** 宿主（任务卡头 / 热点成片页）用它驱动工作台，与工作台里的按钮完全同源 */
 export interface HotStoryWorkbenchHandle {
-  runPipeline: () => void;
+  runPipeline: (opts?: RunPipelineOptions) => void;
   cancelPipeline: () => void;
   /** 打开某份方案（热点成片页左侧列表点条目时用） */
   openBoard: (id: string) => void;
@@ -217,10 +249,12 @@ export interface HotStoryWorkbenchProps {
   /** 豆包未登录时把面板打开让用户扫码（单镜生图 / 流水线都会用到） */
   onOpenDoubao?: () => void;
   /**
-   * 不摆工作台里那个大「成片」按钮：任务卡的卡头已经用同一个按钮取代了它
-   * （工作区卡，见 WorkspaceView）。独立「热点成片」页没有卡头按钮，必须保留。
+   * 任务卡模式（嵌在工作区卡里，全自动）：这里只给结果，不给操作。
+   * - 不摆大「成片」按钮：卡建好就自己跑，没人需要点它
+   * - 不摆镜头的上移 / 下移 / 删除、以及「重写 / 生图」：这些是手动编辑，属于「热点成片」页
+   * 独立「热点成片」页要保留这些（那里是唯一的编辑器）。
    */
-  hideGenerateButton?: boolean;
+  cardMode?: boolean;
   /** 任务卡头拿它驱动工作台（与工作台里那颗按钮同一套动作） */
   controlRef?: MutableRefObject<HotStoryWorkbenchHandle | null>;
   /** 把这个按钮的状态发给宿主（宿主照它画卡头那颗按钮） */
@@ -257,7 +291,7 @@ export default function HotStoryWorkbench({
   onBoardIdChange,
   showLastDraft = true,
   onOpenDoubao,
-  hideGenerateButton = false,
+  cardMode = false,
   controlRef,
   onPipelineState,
   hideHotPicker = false,
@@ -303,6 +337,8 @@ export default function HotStoryWorkbench({
   const [imageEngine, setImageEngine] = useState<ImageProviderInfo | null>(null);
 
   const [settings, setSettings] = useState<DialogueSettings | null>(null);
+  /** 分镜由谁写：「Codex CLI」/「AI 服务 · deepseek-chat」；null = 还没读到 */
+  const [llmRoute, setLlmRoute] = useState<LlmRoute | null>(null);
   const [voiceOptions, setVoiceOptions] = useState(VOICE_OPTIONS);
   const [narratorVoice, setNarratorVoice] = useState(DEFAULT_VOICE);
 
@@ -359,6 +395,13 @@ export default function HotStoryWorkbench({
           .providerInfo()
           .then((info) => {
             if (alive) setImageEngine(info);
+          })
+          .catch(() => {});
+        // 文案/分镜由谁写：应用了运行时就是 CLI，没接才是「AI 服务」的 Key
+        void window.llm
+          .route()
+          .then((r) => {
+            if (alive) setLlmRoute(r);
           })
           .catch(() => {});
         const favs = effectiveFavoriteVoices(app.favoriteVoices);
@@ -1068,6 +1111,8 @@ export default function HotStoryWorkbench({
   const [pipeline, setPipeline] = useState<PipelineState | null>(null);
   /** 防重入：流水线跑着的时候不许再点一次 */
   const pipelineBusyRef = useRef(false);
+  /** 成片预览框：出片后把它滚到眼前（用户说"我只要结果"，别让他自己往下翻） */
+  const previewRef = useRef<HTMLDivElement | null>(null);
   /** 当前阶段的引用（catch 里要知道错在哪一步） */
   const pipelineStageRef = useRef<PipelineStage>("story");
   /** 等批量生图跑完的挂点（由 onBatchProgress 唤醒） */
@@ -1115,7 +1160,7 @@ export default function HotStoryWorkbench({
    * skipStory：缺图重试时用——分镜已经有了，不用再花一次 AI 调用重写（也会把用户改过的
    * 文案/提示词冲掉）。
    */
-  async function runPipeline(opts: { skipStory?: boolean } = {}): Promise<void> {
+  async function runPipeline(opts: RunPipelineOptions = {}): Promise<void> {
     if (pipelineBusyRef.current) return;
     if (!settings) return;
     if (!board?.shots.length && !selectedHot && !customTopic.trim()) {
@@ -1123,11 +1168,14 @@ export default function HotStoryWorkbench({
       return;
     }
     /*
-     * 跑之前确认一次（宿主给的文案）。
-     * 只在「这一轮还没跑过」时问：`pipeline` 有值说明已经在跑或已经跑完，
-     * 这时再弹一次就只是烦人（重试缺图 / 重试这一步都是接着跑）。
+     * 跑之前确认一次（宿主给的文案）。只在「这一轮还没跑过」时问：
+     * `pipeline` 有值说明已经在跑或已经跑完，这时再弹一次就只是烦人
+     * （重试缺图 / 重试这一步都是接着跑）。
+     *
+     * 托管开跑（工作台对话区建卡后自动跑）显式传 confirmed，跳过这一问：
+     * 用户说的是"我自己不操作，只要结果"，再弹确认就是让他点一下。
      */
-    if (confirmBeforeRun && !pipeline && !window.confirm(confirmBeforeRun)) return;
+    if (confirmBeforeRun && !opts.confirmed && !pipeline && !window.confirm(confirmBeforeRun)) return;
     pipelineBusyRef.current = true;
     setError(null);
     setHint(null);
@@ -1213,6 +1261,16 @@ export default function HotStoryWorkbench({
      * 失败/中止时错误区也要说一句 —— 那里有「打开豆包登录」这类出口。
      */
     if (res.status === "error" || res.status === "cancelled") setError(res.message);
+    /*
+     * 出片了：把预览滚到眼前。
+     * 工作台嵌在任务卡里时上面还有①设定②分镜，成片在③最下面——
+     * 用户要的是结果，不该让他自己往下翻。等一帧，让预览区先挂上视频。
+     */
+    if (res.status === "done") {
+      requestAnimationFrame(() => {
+        previewRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+      });
+    }
   }
 
   /** 中止一键成片：写分镜阶段停 AI 请求，生图阶段停队列，合成阶段停渲染 */
@@ -1250,18 +1308,18 @@ export default function HotStoryWorkbench({
    * 用 ref 转一手的理由：runPipeline / cancelPipeline 每次渲染都是新函数，
    * 直接挂给宿主的话，宿主拿到的是第一帧那份闭包（那时 settings 还是 null，点了会直接 return）。
    */
-  const runPipelineImpl = useRef<() => void>(() => {});
+  const runPipelineImpl = useRef<(opts?: RunPipelineOptions) => void>(() => {});
   const cancelPipelineImpl = useRef<() => void>(() => {});
   const openBoardImpl = useRef<(id: string) => void>(() => {});
   const startFreshImpl = useRef<() => void>(() => {});
-  runPipelineImpl.current = () => void runPipeline();
+  runPipelineImpl.current = (opts) => void runPipeline(opts);
   cancelPipelineImpl.current = () => void cancelPipeline();
   openBoardImpl.current = (id: string) => void openBoard(id);
   startFreshImpl.current = () => startFresh();
   useEffect(() => {
     if (!controlRef) return;
     controlRef.current = {
-      runPipeline: () => runPipelineImpl.current(),
+      runPipeline: (opts) => runPipelineImpl.current(opts),
       cancelPipeline: () => cancelPipelineImpl.current(),
       openBoard: (id: string) => openBoardImpl.current(id),
       startFresh: () => startFreshImpl.current(),
@@ -1278,7 +1336,12 @@ export default function HotStoryWorkbench({
   /** 忙到点了没用（waiting 不算：waiting 时点它是「继续合成」） */
   const pipelineHardBusy = pipelineRunning || generating || composing || hotLoading;
   const pipelineButton: PipelineButtonState = {
-    canRun: !pipelineHardBusy && hasPipelineTarget && !engineBlocked,
+    /*
+     * 配置没读出来（settings=null）时不能算"可以跑"：
+     * runPipeline 里 settings 为 null 会直接 return，宿主（托管开跑）踢一脚就静默没动静了。
+     * 把它算进 canRun，等配置到了宿主自然会再踢一次。
+     */
+    canRun: !pipelineHardBusy && hasPipelineTarget && !engineBlocked && !!settings,
     label: pipeline?.status === "waiting"
       ? `继续合成（缺 ${pipeline.missing} 张）`
       : pipelineRunning
@@ -1286,18 +1349,25 @@ export default function HotStoryWorkbench({
         : generating
           ? "生成中…"
           : "成片",
-    disabledReason: engineBlocked
-      ? imageEngine?.message ?? "生图引擎还没准备好"
-      : !hasPipelineTarget
-        ? "先在上面选一条热点，或填一个主题"
-        : pipelineHardBusy
-          ? "正在跑，等它结束或点「中止」"
-          : null,
+    disabledReason: !settings
+      ? "正在读取生图与配音配置…"
+      : engineBlocked
+        ? imageEngine?.message ?? "生图引擎还没准备好"
+        : !hasPipelineTarget
+          ? "先在上面选一条热点，或填一个主题"
+          : pipelineHardBusy
+            ? "正在跑，等它结束或点「中止」"
+            : null,
     running: pipelineRunning || pipeline?.status === "waiting",
     missing: pipeline?.missing ?? 0,
+    stage: pipeline?.stage ?? null,
+    message: pipeline?.message ?? null,
+    status: pipeline?.status ?? null,
+    outputPath: outputPath ?? null,
+    finished: !!pipeline && pipeline.status !== "running",
   };
   /* 只在值真的变了才发：不然宿主每次拿到新对象都会重渲染一遍 */
-  const pipelineButtonSig = `${pipelineButton.canRun}|${pipelineButton.label}|${pipelineButton.disabledReason ?? ""}|${pipelineButton.running}|${pipelineButton.missing}`;
+  const pipelineButtonSig = `${pipelineButton.canRun}|${pipelineButton.label}|${pipelineButton.disabledReason ?? ""}|${pipelineButton.running}|${pipelineButton.missing}|${pipelineButton.stage ?? ""}|${pipelineButton.message ?? ""}|${pipelineButton.status ?? ""}|${pipelineButton.outputPath ?? ""}|${pipelineButton.finished}`;
   useEffect(() => {
     onPipelineState?.(pipelineButton);
   }, [onPipelineState, pipelineButtonSig]);
@@ -1316,7 +1386,9 @@ export default function HotStoryWorkbench({
         */}
       {error && (
         <div className="story-error">
-          <span>{error}</span>
+          {/* IPC 那层会把主进程的错包成 "Error invoking remote method 'x': Error: …"，
+              这里只说里层那句（用户不需要知道是哪个通道抛的） */}
+          <span>{stripIpc(error)}</span>
           <div className="story-error-actions">
             {failCode === "not-logged-in" ? (
               <button type="button" className="link" onClick={() => onOpenDoubao?.()}>
@@ -1352,9 +1424,11 @@ export default function HotStoryWorkbench({
           <span className="story-muted">
             {readOnly
               ? "这条片子的设定（只读）"
-              : hideHotPicker
-                ? "定好主题和画面，点卡头的「成片」开跑"
-                : "选热点，或直接输入你想做的主题"}
+              : pipelineRunning
+                ? "正在跑，设定先不用管"
+                : cardMode
+                  ? "定好主题和画面就行，剩下的它自己跑完"
+                  : "选热点，或直接输入你想做的主题"}
           </span>
         </div>
 
@@ -1476,38 +1550,35 @@ export default function HotStoryWorkbench({
               />
             </div>
           </div>
+          {/*
+            任务卡（cardMode）里整块不摆：那颗「成片」由自己开跑取代，中止在卡头，
+            进度面板（下面那块）才是这里唯一要显示的东西。
+          */}
+          {!cardMode && (
           <div className="story-ai-zone">
-            {/*
-              嵌在任务卡里时这颗按钮由卡头承担（同一个动作，工作台把状态交给宿主），
-              这里就不再摆一个同级主按钮——两颗权重一样的按钮并排，用户不知道该点哪个。
-              进度面板和「重试缺图 / 重试这一步」这些上下文按钮照旧留在工作台里。
-            */}
-            {!hideGenerateButton && (
-              <button
-                type="button"
-                className="ai-generate-button"
-                disabled={pipelineRunning || generating || composing || hotLoading}
-                onClick={() => void runPipeline()}
-                aria-label="AI 成片"
-                title="写分镜 → 缺图的镜头自动生图 → 配音+字幕+运镜合成，一次跑完"
-              >
-                <span className="ai-generate-icon" aria-hidden="true">
-                  AI
-                </span>
-                <span className="ai-generate-label">
-                  {pipeline?.status === "waiting"
-                    ? "继续合成"
-                    : pipelineRunning
-                      ? "成片中…"
-                      : generating
-                        ? "生成中…"
-                        : "成片"}
-                </span>
-              </button>
-            )}
+            <button
+              type="button"
+              className="ai-generate-button"
+              disabled={pipelineRunning || generating || composing || hotLoading}
+              onClick={() => void runPipeline()}
+              aria-label="AI 成片"
+              title="写分镜 → 缺图的镜头自动生图 → 配音+字幕+运镜合成，一次跑完"
+            >
+              <span className="ai-generate-icon" aria-hidden="true">
+                AI
+              </span>
+              <span className="ai-generate-label">
+                {pipeline?.status === "waiting"
+                  ? "继续合成"
+                  : pipelineRunning
+                    ? "成片中…"
+                    : generating
+                      ? "生成中…"
+                      : "成片"}
+              </span>
+            </button>
             <div className="story-ai-links">
-              {/* 卡头已经给了「中止」，这里就不用再来一个 */}
-              {pipelineRunning && !hideGenerateButton ? (
+              {pipelineRunning ? (
                 <button type="button" className="link" onClick={() => void cancelPipeline()}>
                   中止
                 </button>
@@ -1519,6 +1590,7 @@ export default function HotStoryWorkbench({
               ) : null}
             </div>
           </div>
+          )}
         </div>
         {pipeline && (
           <div className={`story-pipeline ${pipeline.status}`}>
@@ -1552,7 +1624,7 @@ export default function HotStoryWorkbench({
               })}
             </ol>
             <div className="story-pipeline-msg">
-              {pipeline.message}
+              {stripIpc(pipeline.message)}
               {(pipeline.status === "running" || pipeline.status === "waiting") &&
                 ` · 已用时 ${pipelineSeconds}s`}
             </div>
@@ -1623,9 +1695,13 @@ export default function HotStoryWorkbench({
           <span className="story-muted">
             {board
               ? `自动保存 · ${boardFilled}/${board.shots.length} 张图已就绪`
-              : "出好分镜后，这里逐镜改文案、生图"}
+              : pipeline?.stage === "story" && pipeline.status === "running"
+                ? "正在写分镜，写好就出现在这里"
+                : "出好分镜后，这里逐镜改文案、生图"}
             {/* 让用户一眼看到现在用的是哪个引擎（切了设置不用猜） */}
             {imageEngine ? ` · 生图引擎：${imageEngine.label}` : ""}
+            {/* 文案/分镜的模型来源：应用了运行时就是它，不用再去填 API Key */}
+            {llmRoute && llmRoute.source !== "none" ? ` · 分镜：${llmRoute.label}` : ""}
           </span>
         </div>
 
@@ -1636,6 +1712,9 @@ export default function HotStoryWorkbench({
 
         {board ? (
         <>
+          {/* 任务卡（cardMode）不摆这排：加镜头 / 复制 / 删除方案都是编辑动作，
+              卡片只给结果，要动手去「热点成片」页 */}
+          {!cardMode && (
           <div className="board-toolbar">
             {/* 只读态不给增删镜头：分镜是机器的产物；要改去「热点成片」页 */}
             {!readOnly && (
@@ -1681,6 +1760,7 @@ export default function HotStoryWorkbench({
               </button>
             )}
           </div>
+          )}
           {/* 批量生图进度：跑的时候显示「第 n / 共 m 张」，结束后显示汇总 */}
           {batch ? (
             <div className={`batch-progress ${batch.running ? "" : "done"}`}>
@@ -1699,7 +1779,9 @@ export default function HotStoryWorkbench({
           ) : null}
 
           {board.shots.length === 0 && (
-            <div className="story-empty">还没有镜头，点「＋ 加一个自由镜头」。</div>
+            <div className="story-empty">
+              {cardMode ? "还没有镜头。" : "还没有镜头，点「＋ 加一个自由镜头」。"}
+            </div>
           )}
 
           <div className="shot-list">
@@ -1714,8 +1796,8 @@ export default function HotStoryWorkbench({
                     <span className="shot-gen-msg">{genShotMsg}</span>
                   ) : null}
                   <div className="shot-head-actions">
-                    {/* 只读态不给改镜头顺序/删除：这些都是编辑动作 */}
-                    {!readOnly && (
+                    {/* 只读态 / 任务卡（全自动）都不给改镜头顺序、删除：编辑都在「热点成片」页 */}
+                    {!readOnly && !cardMode && (
                       <>
                         <button
                           type="button"
@@ -1814,8 +1896,8 @@ export default function HotStoryWorkbench({
                           ) : null}
                         </span>
                         <span className="story-field-actions">
-                          {/* 只读态不给「重写 / 生图」：跑起来之后提示词与图都是机器的产物 */}
-                          {!readOnly && (
+                          {/* 只读态 / 任务卡（全自动）都不给「重写 / 生图」：这些是手动编辑 */}
+                          {!readOnly && !cardMode && (
                             <>
                               <button
                                 type="button"
@@ -1863,9 +1945,11 @@ export default function HotStoryWorkbench({
         </>
         ) : (
           <div className="story-empty">
-            {readOnly
-              ? "这一轮没有分镜——回工作台点卡头的「成片」跑一次。"
-              : "出好分镜后，每个镜头的旁白 / 提示词 / 图片会显示在这里——先在①点「成片」。"}
+            {cardMode
+              ? "这一轮没有出分镜——重新发一句主题，它会自己再跑一遍。"
+              : readOnly
+                ? "这一轮没有分镜。"
+                : "出好分镜后，每个镜头的旁白 / 提示词 / 图片会显示在这里——先在①点「成片」。"}
           </div>
         )}
       </section>
@@ -1916,7 +2000,10 @@ export default function HotStoryWorkbench({
             （以前 260 宽 + 竖屏 9:16 会撑出 460 多像素高，把按钮挤到下面）。
           */}
           <div className="compose-row">
-            <div className={`compose-preview ${outputPath && previewUrl ? "filled" : ""}`}>
+            <div
+              ref={previewRef}
+              className={`compose-preview ${outputPath && previewUrl ? "filled" : ""}`}
+            >
               {outputPath && previewUrl ? (
                 <video controls src={previewUrl} />
               ) : (

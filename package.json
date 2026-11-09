@@ -1,7 +1,7 @@
 {
   "name": "baoluo",
   "productName": "宝螺",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "private": true,
   "license": "MIT",
   "description": "宝螺 - 素材捕手 · 语音合成 · 对话视频生成",
@@ -30,7 +30,9 @@
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.node.json",
     "bump": "npm version --no-git-tag-version --allow-same-version",
-    "postinstall": "node scripts/setup-whisper.cjs && node scripts/setup-python.cjs",
+    "postinstall": "node scripts/ensure-ffmpeg.cjs && node scripts/setup-whisper.cjs && node scripts/setup-python.cjs",
+    "fix:ffmpeg": "node scripts/ensure-ffmpeg.cjs",
+    "install:safe": "cross-env FFMPEG_BINARIES_URL=https://registry.npmmirror.com/-/binary/ffmpeg-static npm install",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
     "test:genie": "node scripts/test-genie-install-env.cjs",
@@ -42,6 +44,8 @@
     "test:doubao-migrate": "node scripts/test-doubao-migrate-runner.cjs",
     "test:datadir": "electron scripts/test-data-dir.cjs",
     "test:agent": "node scripts/test-agent-router.cjs",
+    "test:runtime": "node scripts/test-runtime-detect.cjs",
+    "test:llm": "electron scripts/test-llm-runtime.cjs",
     "test:agent-runner": "electron scripts/test-agent-runner.cjs",
     "test": "node scripts/test-parser.cjs && node scripts/test-agent-router.cjs && node scripts/test-genie-install-env.cjs && node scripts/test-genie-background.cjs",
     "test:doubao-gen": "electron scripts/test-doubao-generate.cjs",
@@ -70,7 +74,7 @@
   "dependencies": {
     "ffmpeg-static": "^5.3.0",
     "jsonrepair": "^3.15.0",
-    "node-edge-tts": "^1.2.10",
+    "node-edge-tts": "^1.2.12",
     "opencc-js": "^1.4.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"

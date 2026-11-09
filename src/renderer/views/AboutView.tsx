@@ -28,7 +28,10 @@ const APP_INFO = {
   email: "",
 };
 
-export default function AboutView({ nav }: { nav?: ReactNode } = {}) {
+export default function AboutView({
+  nav,
+  list,
+}: { nav?: ReactNode; list?: ReactNode } = {}) {
   /** 运行日志位置：null 表示还没取到 */
   const [logInfo, setLogInfo] = useState<{ dir: string; file: string } | null>(null);
   const [logCopied, setLogCopied] = useState(false);
@@ -65,7 +68,7 @@ export default function AboutView({ nav }: { nav?: ReactNode } = {}) {
   }
 
   return (
-    <NavPage nav={nav}>
+    <NavPage nav={nav} list={list}>
       <div className="view about-view">
       <h2>关于</h2>
       <p className="subtitle">

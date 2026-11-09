@@ -382,6 +382,35 @@ button:disabled {
   gap: 8px;
 }
 
+/* 素材捕手左栏「记录」：跟其它页的历史列表同一套（.split-items 自己滚） */
+.mat-records {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* 记录标题右侧：「＋ 新建」+「清空」，两者挤在一行别换行 */
+.mat-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.mat-clear {
+  border: 0;
+  background: transparent;
+  padding: 0 2px;
+  font: inherit;
+  font-size: 12px;
+  color: #8e8e93;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.mat-clear:hover {
+  color: #c20e2b;
+}
+
 .progress {
   margin-top: 12px;
   height: 6px;
@@ -474,6 +503,15 @@ button:disabled {
 }
 
 /* ---------------- 关于页 ---------------- */
+/* 面板标题里的小 logo：与顶栏/侧栏品牌 logo 一致（22px），不约束会按 1024 原图渲染 */
+.brand-logo-inline {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  vertical-align: -5px;
+  margin-right: 8px;
+}
 .about-view .card-pad + .card-pad {
   margin-top: 20px;
 }
@@ -840,8 +878,8 @@ button:disabled {
   color: #1d1d1f;
 }
 .side-nav-item.active {
-  background: rgba(0, 122, 255, 0.1);
-  color: #0066d6;
+  background: rgba(0, 0, 0, 0.06);
+  color: #1d1d1f;
   font-weight: 500;
 }
 .side-nav-icon {
@@ -893,6 +931,62 @@ button:disabled {
   flex-direction: column;
   padding-top: 8px;
   border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+/* 底部项的弹层锚点：子菜单浮层相对这个格子定位 */
+.side-nav-cell-bottom {
+  position: relative;
+}
+/* 点击浮层外收起用的兜底层 */
+.side-nav-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+/* 沉底项的子菜单浮层：从按钮上方弹出（底部空间不够，往上长） */
+.side-nav-popup {
+  position: absolute;
+  left: 6px;
+  bottom: calc(100% + 8px);
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 210px;
+  padding: 5px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  animation: side-nav-pop-in 0.12s ease-out;
+}
+@keyframes side-nav-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.side-nav-popup-item {
+  padding: 7px 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: #1d1d1f;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.side-nav-popup-item:hover {
+  background: #f2f3f5;
+}
+.side-nav-popup-item.active {
+  background: rgba(0, 122, 255, 0.1);
+  color: #0066d6;
+  font-weight: 600;
 }
 .lic-badge {
   margin-left: auto;
@@ -1421,8 +1515,106 @@ button.link.danger-link {
   align-items: center;
   margin-bottom: 4px;
 }
+/* 左栏小节标题行（任务 / 记录 / 方案）：分隔线画在标题下面——
+   导航已挪去顶栏，标题上面没有可分隔的东西了 */
+.ws-list > .panel-title-row,
+.split-list > .panel-title-row {
+  margin-top: 2px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
 .panel-title-row .status {
   margin-top: 0;
+}
+/* 「任务」标题行右侧：计数 + 新建（+）按钮 */
+.ws-list-title-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* 「会话 / 任务 / 记录」标题行右侧的「＋ 新建」：样式统一由 components/SideList 的
+   ListAddButton 决定（白底描边小按钮），这里只管别被窄列挤到换行。 */
+.list-add-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+/* 工作台入口页（home）：左栏只剩导航，右侧整页插件卡片（启动器式：分类标题 + 卡片行）。
+   必须用 .ws.ws-home-wrap 提一档权重：.ws 的三列定义在文件后面，同权重会被它盖回去，
+   入口页就会留下一条空列（操作区的位置）——右侧一大块空白就是这么来的。 */
+.ws.ws-home-wrap {
+  grid-template-columns: minmax(150px, 268px) 1fr;
+}
+.ws-home {
+  overflow-y: auto;
+  padding: 24px 32px 32px;
+}
+.ws-home-title {
+  margin: 0 0 10px;
+  font-size: 20px;
+  font-weight: 700;
+  color: #1d1d1f;
+}
+.ws-home-group {
+  margin-top: 14px;
+}
+.ws-home-group-title {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #86868b;
+}
+.ws-home-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+.ws-home-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, transform 0.12s ease;
+}
+.ws-home-card:hover {
+  border-color: rgba(0, 122, 255, 0.45);
+  box-shadow: 0 2px 10px rgba(0, 122, 255, 0.1);
+  transform: translateY(-1px);
+}
+.ws-home-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  font-size: 17px;
+  flex-shrink: 0;
+}
+.ws-home-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ws-home-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+.ws-home-card-desc {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #86868b;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 /* 标题右侧的动作组（保存模板 / 重置）：跟状态、按钮排成一行贴右边 */
 .panel-title-actions {
@@ -1550,6 +1742,32 @@ button.link:hover:not(:disabled) {
 .form-row textarea:focus {
   border-color: #007aff;
   box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
+}
+/* 输入框 + 右侧内嵌链接（AI 服务页的「显示 / 拉取模型列表」）：
+   链接悬浮在框内右边、不再占独立一列，API Key / Base URL / 模型三个框右缘对齐 */
+.ai-input-wrap {
+  position: relative;
+  grid-column: 2 / -1;
+  min-width: 0;
+}
+.ai-input-wrap input,
+.ai-input-wrap select {
+  width: 100%;
+  padding-right: 92px;
+}
+.ai-input-wrap .bee-select {
+  width: 100%;
+}
+.ai-input-wrap .bee-select-trigger {
+  padding-right: 92px;
+}
+.ai-input-wrap > button.link {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  font-size: 12px;
 }
 select option {
   padding: 14px 14px;
@@ -2336,6 +2554,12 @@ select option {
   /* 两区之间的分隔线画在这里（右区不再画，免得两条） */
   border-right: 1px solid rgba(0, 0, 0, 0.07);
 }
+/* 右侧列表栏（记录/历史挪到工作区右边时用）：分隔线改画在左边 */
+.split-list-right {
+  width: 240px;
+  border-right: none;
+  border-left: 1px solid rgba(0, 0, 0, 0.07);
+}
 .split-title {
   font-size: 22px;
   font-weight: 700;
@@ -2347,8 +2571,19 @@ select option {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  /* 与左栏「会话」那块（`.split-list > .panel-title-row`）取同一组数：
+     标题下一条浅分割线，把标题行和下面的列表/空态分开。
+     插件页以前没有这条线，看着像标题和列表糊在一起。 */
+  margin-top: 2px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
 }
-/* ---------------- 对话模板库（对话模式右区的一块） ---------------- */
+/* ---------------- 对话模板库（对话模式：点「管理」弹出的弹窗） ---------------- */
+/* 模板管理弹窗比提示类弹窗宽一点，列表要放得下名字 + 三个操作按钮 */
+.tpl-mgr-modal {
+  width: min(660px, calc(100vw - 48px));
+}
 .tpl-new-row {
   display: flex;
   align-items: center;
@@ -2584,6 +2819,12 @@ select option {
     background: #fff;
     border-radius: 16px;
     border-right: none;
+  }
+  /* 右侧列表栏在窄屏上跟着退回流式布局：编辑器在上、记录在下，宽度铺满 */
+  .split-list-right {
+    width: 100%;
+    margin-top: 16px;
+    border-left: none;
   }
   .split-items {
     overflow-y: auto;
@@ -4085,7 +4326,6 @@ select option {
   padding-inline: max(16px, calc((100% - 800px) / 2));
 }
 .ws.panel-closed .ws-input,
-.ws.panel-closed .ws-input-foot,
 .ws.panel-closed .ws-hot-panel {
   width: 100%;
   max-width: 800px;
@@ -4173,6 +4413,35 @@ select option {
 .topnav-brand-toggle:hover .topnav-brand-hover {
   opacity: 1;
   color: #1d1d1f;
+}
+/* 顶栏一级导航：工作台 / 设置。选中态用与左栏一致的浅灰胶囊 */
+.topnav-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 22px;
+}
+.topnav-tab {
+  padding: 5px 14px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #6b6b70;
+  font-size: 13px;
+  line-height: 1.3;
+  cursor: pointer;
+  /* 顶条是拖拽区，按钮要单独解除 */
+  -webkit-app-region: no-drag;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.topnav-tab:hover {
+  background: rgba(0, 0, 0, 0.04);
+  color: #1d1d1f;
+}
+.topnav-tab.active {
+  background: rgba(0, 0, 0, 0.06);
+  color: #1d1d1f;
+  font-weight: 500;
 }
 .ws-list-items {
   /* 与 .split-items 同款：列表自己滚，条目再多也不把标题和底部入口顶走 */
@@ -4324,6 +4593,10 @@ select option {
   gap: 10px;
 }
 
+/* 模板配置卡头：模板下拉框收一收宽度，跟旁边的小按钮排一排 */
+.tpl-select-wrap .bee-select-trigger {
+  width: 100%;
+}
 /* 「用模板」下拉：跟步骤标题并排，所以只占一小段宽度（BeeSelect 默认铺满） */
 .ws-tpl-pick {
   width: 132px;
@@ -4681,15 +4954,6 @@ select option {
   white-space: pre-wrap;
 }
 
-.ws-chat-head {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 10px 0;
-  background: #f5f5f7;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-}
 .ws-chat-avatar {
   width: 26px;
   height: 26px;
@@ -4708,13 +4972,12 @@ select option {
   margin-right: -16px;
   padding-right: 16px;
 }
-/* 输入区与对话区右缘对齐：气泡内容右缘让位 8px 给滚动条，
-   输入区同样让 8px（不加负外边距，否则绝对定位的发送按钮会出界） */
-.ws-input,
-.ws-input-foot,
-.ws-hot-panel {
-  padding-right: 20px;
-}
+/*
+ * 输入区与对话区右缘对齐：
+ * 气泡列的滚动条是覆盖式（浮在 chat 的 16px 内边距里），不影响气泡右缘；
+ * 所以输入框、热点面板都不再额外让位——一旦加 padding/margin，
+ * 它们的边框就会比聊天气泡缩进去一截（对不齐）。
+ */
 .ws-bubble {
   padding: 9px 12px;
   border-radius: 12px;
@@ -4744,6 +5007,49 @@ select option {
   background: #007aff;
   color: #fff;
 }
+/* 一条助手消息可能有两块：文字气泡 + 这一轮的结果卡，竖着排 */
+.ws-bubble-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 92%;
+}
+.ws-bubble-col .ws-bubble.bot {
+  max-width: 100%;
+}
+/* 结果卡入口：会话里点一下就把它摆到右边看细节 */
+.ws-result-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid #e3e4e8;
+  border-radius: 9px;
+  background: #fff;
+  color: #1d1d1f;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.ws-result-chip:hover {
+  border-color: #c7c9d1;
+  background: #fafafb;
+}
+.ws-result-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #34c759;
+  flex: none;
+}
 .ws-chip {
   font: inherit;
   font-size: 12px;
@@ -4762,41 +5068,9 @@ select option {
   border-color: rgba(0, 122, 255, 0.35);
   color: #0066d6;
 }
-.ws-mention {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
-}
-.ws-mention-item {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 6px 8px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: #1d1d1f;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.ws-mention-item.active {
-  background: rgba(0, 122, 255, 0.1);
-}
-.ws-mention-label {
-  font-size: 12.5px;
-  font-weight: 600;
-}
-.ws-mention-hint {
-  font-size: 11px;
-  color: #86868b;
-}
 .ws-hot-panel {
+  position: relative;
+  z-index: 41;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -4804,6 +5078,45 @@ select option {
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 12px;
   background: #f7f8fa;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+}
+/* 面板标题行：左标题 + 右 ✕（关掉榜单） */
+.ws-hot-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ws-hot-head-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+.ws-hot-head-hint {
+  margin-left: 8px;
+  font-weight: 400;
+  font-size: 11px;
+  color: #86868b;
+}
+.ws-hot-close {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #86868b;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ws-hot-close:hover {
+  background: #eceef2;
+  color: #1d1d1f;
 }
 .ws-hot-sources {
   display: flex;
@@ -4853,15 +5166,101 @@ select option {
   font-size: 11px;
 }
 /* 输入框上面那条：显式的「选热点」入口（藏在 @ 名单里不够显眼，而热榜已经不在卡上了） */
-.ws-input-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}.ws-input {
+/* 「＋」弹出菜单：挂在输入框左下角上方，点加号出现、点空白处收起 */
+.ws-input {
   position: relative;
   display: flex;
   gap: 8px;
   align-items: flex-end;
+}
+.ws-plus-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: transparent;
+}
+.ws-plus-menu {
+  position: absolute;
+  left: 8px;
+  bottom: calc(100% + 8px);
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 240px;
+  max-width: min(420px, calc(100vw - 60px));
+  max-height: 340px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  animation: ws-plus-in 0.12s ease-out;
+}
+@keyframes ws-plus-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+/* 单行条目：图标 · 文字 · 右侧箭头（悬停整行微亮） */
+.ws-plus-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #1d1d1f;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ws-plus-item:hover,
+.ws-plus-item.active {
+  background: #f2f3f5;
+}
+.ws-plus-item-icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: #636366;
+}
+.ws-plus-item-label {
+  flex-shrink: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.ws-plus-item-hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: #86868b;
+}
+.ws-plus-item-chevron {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: #b0b0b5;
+  font-size: 14px;
+  line-height: 1;
+}
+.ws-plus-item-hint + .ws-plus-item-chevron {
+  margin-left: 4px;
+}
+/* 分隔线：图片/热点入口与功能名单之间 */
+.ws-plus-sep {
+  height: 1px;
+  margin: 5px 4px;
+  background: rgba(0, 0, 0, 0.07);
 }
 .ws-input textarea {
   flex: 1;
@@ -4971,25 +5370,9 @@ select option {
   }
 }
 
-/* ---------------- 内嵌豆包（v1.0.0）：铺满内容区的全屏面板 ----------------
-   原来是右侧 760px 抽屉，用户要求「嵌入软件，全屏显示」→ 现在从顶栏下沿一直铺到窗口底部，
-   左侧导航也被盖住（顶栏留着，随时能切页或关掉）。
-   面板的壳是 HTML，里面的豆包网页是主进程挂上来的原生 WebContentsView，
-   所以 .doubao-drawer-slot 必须是个不透明的空盒子：
-   它只用来给主进程量坐标，里面塞的东西都会被原生视图盖住。 */
-.doubao-drawer {
-  position: fixed;
-  top: var(--topnav-h);
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: #fff;
-  display: flex;
-  flex-direction: column;
-  z-index: 60;
-  /* 全屏面板用淡入，不用"从右边滑进来"（那会让整块内容横扫一屏） */
-  animation: doubao-panel-in 0.14s ease-out;
-}
+/* ---------------- 豆包独立窗口（v1.1.0）的失败提示卡片 ----------------
+   豆包页面在主进程的独立 BrowserWindow 里，不占宝螺的 DOM；
+   只有「窗口加载失败」时才需要在这里出一张卡片（独立窗口里只有白页）。 */
 @keyframes doubao-panel-in {
   from {
     opacity: 0;
@@ -4998,58 +5381,31 @@ select option {
     opacity: 1;
   }
 }
-.doubao-drawer-head {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  background: #fafafa;
-}
-.doubao-drawer-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #1d1d1f;
-}
-.doubao-drawer-sub {
-  font-size: 12px;
-  color: #86868b;
-  flex: 1;
-}
-.doubao-drawer-actions {
-  display: flex;
-  gap: 8px;
-}
-/* 原生视图就摆在这个矩形上：不要给它背景色，否则加载中会盖住下面的提示 */
-.doubao-drawer-slot {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  background: transparent;
-}
-/* 加载 / 失败提示：视图这时候是隐藏的，所以提示能看见 */
-.doubao-drawer-mask {
-  position: absolute;
-  inset: 0;
+.doubao-window-toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 90;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 24px;
-  text-align: center;
-  font-size: 13px;
-  color: #86868b;
+  gap: 10px;
+  max-width: 320px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 59, 48, 0.35);
+  border-radius: 12px;
   background: #fff;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
+  animation: doubao-panel-in 0.14s ease-out;
 }
-.doubao-drawer-mask.error {
+.doubao-window-toast p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
   color: #ff3b30;
 }
-.doubao-drawer-mask.error p {
-  margin: 0;
-  max-width: 320px;
-  line-height: 1.6;
+.doubao-window-toast-actions {
+  display: flex;
+  gap: 8px;
 }
 
 /* 页面标题行：副标题 + 右侧开关按钮（原来只有一行 subtitle） */
@@ -5185,6 +5541,118 @@ select option {
 }
 
 /* ---------------- 对话输入区：＋ 加图按钮与附件缩略图 ---------------- */
+/* ---------------- 插件管理（设置 → 插件） ----------------
+   每行：名称+说明（左）+ 安装开关（右）。开关是纯 CSS 圆角滑块。 */
+.plugin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.plugin-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: #fff;
+}
+.plugin-item.installed {
+  border-color: rgba(0, 0, 0, 0.12);
+}
+/* 插件行右端操作区：引擎类插件多一颗「配置」，和开关并排 */
+.plugin-item-ops {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+/* 引擎插件名旁的「使用中」小标签：当前生效的生图引擎 */
+.plugin-engine-chip {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.1);
+  color: #0066d6;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  vertical-align: 1px;
+}
+.plugin-item-text {
+  flex: 1;
+  min-width: 0;
+}
+.plugin-item-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+.plugin-item-desc {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #86868b;
+}
+.plugin-switch {
+  flex-shrink: 0;
+  position: relative;
+  width: 42px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: #d6d6db;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.plugin-switch.on {
+  background: #007aff;
+}
+.plugin-switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.plugin-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s ease;
+}
+.plugin-switch.on .plugin-switch-knob {
+  transform: translateX(18px);
+}
+
+/* 画布 / 分镜头上的「使用模板」开关：小一号，跟 small 按钮排在一行 */
+.tpl-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tpl-toggle-label {
+  font-size: 12px;
+  color: #86868b;
+  user-select: none;
+}
+.plugin-switch.is-sm {
+  width: 34px;
+  height: 19px;
+}
+.plugin-switch.is-sm .plugin-switch-knob {
+  width: 15px;
+  height: 15px;
+}
+.plugin-switch.is-sm.on .plugin-switch-knob {
+  transform: translateX(15px);
+}
+
+/* ---------------- 插件管理（设置 → 插件）结束 ---------------- */
+
 /* 左下角的＋：与右下角的发送圆钮对称 */
 .ws-attach-add {
   position: absolute;
@@ -5205,7 +5673,8 @@ select option {
   cursor: pointer;
   transition: color 0.15s ease, border-color 0.15s ease;
 }
-.ws-attach-add:hover {
+.ws-attach-add:hover,
+.ws-attach-add.active {
   color: #0066d6;
   border-color: rgba(0, 122, 255, 0.5);
 }
@@ -5402,4 +5871,836 @@ select option {
 .tpl-default-chip.is-builtin {
   color: #0066d6;
   background: rgba(0, 122, 255, 0.14);
+}
+
+/* ---------------- 设置 → 运行时（集成运行时） ---------------- */
+.runtime-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.runtime-tip {
+  padding: 12px 14px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 12px;
+  background: #f5f7fb;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: #3a3a3c;
+}
+.runtime-tip b {
+  color: #1d1d1f;
+}
+.runtime-tip-sub {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #86868b;
+}
+.runtime-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.runtime-head-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+.runtime-head-title .count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #eef0f4;
+  color: #636366;
+  font-size: 11px;
+  font-weight: 500;
+}
+.runtime-head button {
+  margin-left: auto;
+}
+.runtime-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.runtime-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: #fff;
+}
+/* 已应用的那一条：淡蓝描边，一眼看出"现在用的是它" */
+.runtime-item.applied {
+  border-color: rgba(0, 122, 255, 0.45);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.08);
+}
+.runtime-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: #eef4ff;
+  color: #0066d6;
+  font-size: 13px;
+  font-weight: 600;
+}
+.runtime-text {
+  flex: 1;
+  min-width: 0;
+}
+.runtime-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+.runtime-version {
+  font-size: 11px;
+  font-weight: 500;
+  color: #86868b;
+}
+.runtime-badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.runtime-badge.ok {
+  background: rgba(52, 199, 89, 0.12);
+  color: #1f8f43;
+}
+.runtime-badge.warn {
+  background: rgba(255, 149, 0, 0.14);
+  color: #a56200;
+}
+.runtime-applied {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.1);
+  color: #0066d6;
+  font-size: 11px;
+  font-weight: 500;
+}
+.runtime-path {
+  margin-top: 3px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: #86868b;
+}
+.runtime-note {
+  margin-top: 4px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #a56200;
+}
+.runtime-ops {
+  flex-shrink: 0;
+}
+.runtime-empty {
+  padding: 18px 16px;
+  border: 1px dashed rgba(0, 0, 0, 0.14);
+  border-radius: 12px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #86868b;
+}
+.runtime-empty b {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  color: #1d1d1f;
+}
+.runtime-warn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 149, 0, 0.25);
+  border-radius: 12px;
+  background: rgba(255, 149, 0, 0.08);
+  font-size: 12px;
+  line-height: 1.6;
+  color: #8a5300;
+}
+.runtime-warn span {
+  flex: 1;
+}
+.runtime-skills {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+.runtime-skills-hint {
+  margin: 0;
+  font-size: 12px;
+  color: #86868b;
+}
+.runtime-skills-hint code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #f2f3f5;
+  font-size: 11.5px;
+}
+.runtime-skill {
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  background: #fff;
+}
+.runtime-skill-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+.runtime-skill-desc {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #86868b;
+}
+
+/* 运行时在想：气泡里的省略号，别让它看起来像卡死 */
+.ws-bubble.ws-typing {
+  color: #86868b;
+  letter-spacing: 1px;
+}
+
+/* ---------------- 输入框底部：权限范围 / 模型 两颗选择器 ----------------
+   和「＋」、发送按钮同一条底带：绝对定位在 .ws-input 里，不占 textarea 的布局。
+   菜单一律往上弹——下面就是窗口底边。 */
+.ws-pick {
+  position: absolute;
+  bottom: 9px;
+  z-index: 42;
+}
+.ws-pick-left {
+  left: 42px;
+}
+.ws-pick-right {
+  right: 68px;
+}
+.ws-pick-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  max-width: 190px;
+  padding: 0 8px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 999px;
+  background: #fff;
+  color: #3a3a3c;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.ws-pick-btn:hover,
+.ws-pick-btn.active {
+  border-color: rgba(0, 122, 255, 0.45);
+  background: rgba(0, 122, 255, 0.05);
+  color: #0066d6;
+}
+/* 完全访问：黄一下，提醒这档不设沙箱 */
+.ws-pick-btn.risky {
+  border-color: rgba(255, 149, 0, 0.45);
+  color: #a56200;
+}
+.ws-pick-icon {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+}
+.ws-pick-label {
+  max-width: 132px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ws-pick-caret {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  color: #b0b0b5;
+}
+.ws-pick-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: transparent;
+}
+.ws-pick-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 272px;
+  padding: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+.ws-pick-menu-right {
+  left: auto;
+  right: 0;
+}
+.ws-pick-title {
+  padding: 4px 8px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: #86868b;
+}
+.ws-pick-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 7px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #1d1d1f;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ws-pick-item:hover {
+  background: #f2f3f5;
+}
+.ws-pick-item.active {
+  background: #f0f5ff;
+}
+.ws-pick-check {
+  flex-shrink: 0;
+  width: 12px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: #007aff;
+}
+.ws-pick-item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ws-pick-item-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.ws-pick-risky {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(255, 149, 0, 0.14);
+  color: #a56200;
+  font-size: 10px;
+  font-weight: 500;
+}
+.ws-pick-item-hint {
+  font-size: 11px;
+  line-height: 1.45;
+  color: #86868b;
+}
+.ws-pick-custom {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 8px 8px 2px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+.ws-pick-custom input {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 7px;
+  background: #fff;
+  color: #1d1d1f;
+  font: inherit;
+  font-size: 12px;
+}
+.ws-pick-custom input:focus {
+  outline: none;
+  border-color: rgba(0, 122, 255, 0.5);
+}
+.ws-pick-custom button {
+  flex-shrink: 0;
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 7px;
+  background: #007aff;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ws-pick-custom button:disabled {
+  background: #d3d5da;
+  cursor: default;
+}
+.ws-pick-foot {
+  padding: 6px 8px 2px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: #a1a1a6;
+}
+
+/* 模型菜单：清单是现读的，可能很长（magpie 一次给十几个），给个上限自己滚 */
+.ws-pick-menu {
+  max-height: min(420px, calc(100vh - 200px));
+  overflow: auto;
+  /* 清单是异步塞进来的：插入 12 行会把"滚动锚点"顶到最底下（实测开场就滚到底部），
+     关掉锚定，菜单永远从第一项开始 */
+  overflow-anchor: none;
+}
+.ws-pick-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ws-pick-reload {
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: #007aff;
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.ws-pick-reload:hover {
+  text-decoration: underline;
+}
+.ws-pick-note {
+  padding: 8px 8px 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #86868b;
+}
+.ws-pick-note.warn {
+  color: #a56200;
+}
+
+/* ---------------- 文字卡视频（插件页）
+
+   左边参数，右边「文案 | 预览」两栏。
+   预览是 iframe 里塞**同一份模板 HTML**，缩放到容器里 —— 所见即所得，
+   不是另画一套假预览（那种两套渲染，最后总要差一点）。
+   ---------------- */
+.tc-side {
+  width: 300px;
+  gap: 14px;
+  /* 这页控件多（模板/画幅/配音/停留/卡点/动效/转场）：矮屏下超出就自己滚，
+     走全站那套细圆头滚动条；内容不满一屏时「生成」按钮仍贴底（margin-top:auto） */
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.tc-lead-hint {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: #8a8a8a;
+}
+.tc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tc-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #5c5c5c;
+}
+.tc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* ---- 模板相册：一张卡 = 缩略图（真模板渲染的静态样张）+ 名字 + 一句话 ---- */
+.tc-tpl-grid {
+  display: grid;
+  /* minmax(0,1fr)：不然名字不换行会把列撑到 min-content，整个网格溢出左栏 */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.tc-tpl {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+  gap: 3px;
+  padding: 5px;
+  text-align: left;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 9px;
+  background: #fff;
+  cursor: pointer;
+}
+.tc-tpl:hover:not(:disabled) {
+  border-color: rgba(0, 0, 0, 0.24);
+}
+.tc-tpl.active {
+  border-color: rgba(0, 122, 255, 0.65);
+  background: rgba(0, 122, 255, 0.05);
+}
+.tc-tpl:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+/* 缩略图：外框按缩放后的实际尺寸撑开并居中，iframe 从左上角缩（见 TextCardView 注释） */
+.tc-tpl-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 60px;
+  overflow: hidden;
+  border-radius: 5px;
+  background: #f1f1f3;
+}
+.tc-tpl-fit {
+  position: relative;
+  overflow: hidden;
+  border-radius: 3px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.tc-tpl-fit iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 0;
+  transform-origin: top left;
+}
+/* 自定义那张不放样张：一个齿轮占位 */
+.tc-tpl-custom-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 16px;
+  color: #8a8a8a;
+  border: 1px dashed rgba(0, 0, 0, 0.18);
+  border-radius: 5px;
+}
+.tc-tpl-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #1d1d1f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tc-tpl.active .tc-tpl-name {
+  color: #0066d6;
+}
+.tc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: #fff;
+  color: #444;
+  font-size: 13px;
+  cursor: pointer;
+}
+.tc-chip:hover:not(:disabled) {
+  border-color: rgba(0, 0, 0, 0.22);
+}
+.tc-chip.active {
+  background: #1c1c1e;
+  border-color: #1c1c1e;
+  color: #fff;
+}
+.tc-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.tc-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+}
+.tc-dot-plain { background: #fff; }
+.tc-dot-dark { background: #111; }
+.tc-dot-note { background: #efe7d8; }
+.tc-dot-poster { background: #050505; }
+.tc-dot-cream { background: linear-gradient(135deg, #cbb9f6, #ffd8e9); }
+.tc-dot-hand { background: #f2e8d5; }
+.tc-chip.active .tc-dot { border-color: rgba(255, 255, 255, 0.5); }
+.tc-hint {
+  font-size: 12px;
+  color: #9a9a9a;
+}
+.tc-side-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* 贴在左栏底部常驻：自定义档参数多，滚下去也要随时能点「生成视频」 */
+  position: sticky;
+  bottom: 0;
+  padding-top: 10px;
+  background: #f2f3f5;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+.tc-go {
+  width: 100%;
+}
+.tc-bar {
+  height: 6px;
+  border-radius: 99px;
+  background: rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+.tc-bar > span {
+  display: block;
+  height: 100%;
+  background: #1c1c1e;
+  transition: width 0.25s ease;
+}
+.tc-progress-text {
+  font-size: 12.5px;
+  color: #6a6a6a;
+}
+/* 配音区：音色下拉 + BGM 行 */
+.tc-select {
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: #fff;
+  color: #444;
+  font-size: 13px;
+  min-width: 0;
+  max-width: 100%;
+}
+.tc-select:disabled {
+  opacity: 0.5;
+}
+.tc-bgm-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.tc-bgm-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: #555;
+  padding: 6px 8px;
+  border: 1px dashed rgba(0, 0, 0, 0.14);
+  border-radius: 8px;
+}
+.tc-bgm-clear {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: #fff;
+  color: #666;
+  cursor: pointer;
+  flex: none;
+}
+.tc-bgm-clear:hover:not(:disabled) {
+  border-color: rgba(0, 0, 0, 0.25);
+}
+/* 上下都占满：右区不出「内容堆在上半截、下半截空一大片」那种半成品观感 */
+.tc-work {
+  display: flex;
+  gap: 18px;
+  align-items: stretch;
+  height: 100%;
+}
+.tc-editor {
+  flex: 1 1 44%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tc-preview {
+  flex: 1 1 56%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tc-pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.tc-text {
+  flex: 1;
+  min-height: 220px;
+  resize: none;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #fcfcfc;
+  font-size: 14px;
+  line-height: 1.8;
+  font-family: inherit;
+  color: #222;
+  outline: none;
+}
+.tc-text:focus {
+  border-color: rgba(0, 0, 0, 0.3);
+}
+.tc-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 12px;
+  color: #8a8a8a;
+}
+.tc-pager button {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 0;
+  background: transparent;
+  color: #6a6a6a;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
+}
+.tc-pager button:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.06);
+}
+.tc-pager button:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+.tc-stage {
+  position: relative;
+  flex: 1;
+  /* 有下限：成片出现后舞台让位给视频，但不至于被挤成一条 */
+  min-height: 240px;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #f1f1f1;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+.tc-stage iframe {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border: 0;
+  transform-origin: center center;
+}
+.tc-error {
+  margin-top: 8px;
+}
+.tc-notice {
+  margin-top: 8px;
+}
+.tc-result {
+  /* 成片和预览同屏：标题占一行，下面「视频 | 路径与按钮」两列；
+     竖屏视频按高度定尺，不再把整块撑到窗口外 */
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  row-gap: 8px;
+  align-items: start;
+  margin-top: 4px;
+  flex: 0 0 auto;
+}
+.tc-result > .tc-pane-head {
+  grid-column: 1 / -1;
+}
+.tc-video-box {
+  width: 176px;
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.tc-video {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 10px;
+}
+.tc-result-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+.tc-open-dir {
+  white-space: nowrap;
+}
+.tc-result-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.tc-path {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #8a8a8a;
+  word-break: break-all;
+  /* 路径最多三行：再长就省略，指过去看 title 里的全路径 */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+@media (max-width: 1000px) {
+  .tc-work {
+    flex-direction: column;
+    height: auto;
+  }
+  .tc-stage {
+    flex: none;
+    height: 46vh;
+  }
+  .tc-side {
+    width: auto;
+  }
 }

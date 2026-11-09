@@ -12,9 +12,6 @@ import type {
   LocalTtsTaskResult,
   LocalTtsTaskSnapshot,
   VideoMeta,
-  VoiceConvertProgress,
-  VoiceConvertRequest,
-  VoiceConvertResult,
 } from "../shared/dialogue-types";
 import { downloadVideo, safeFileName } from "./downloader";
 import { listModels, testChat } from "./ai-client";
@@ -41,10 +38,39 @@ import {
 import { runFfmpeg, probeAudioDuration } from "./dialogue/ffmpeg";
 import { describeFsError } from "./fsError";
 import type { AgentCreateResult, AgentTask } from "../shared/agent-types";
+import type { Conversation, ConversationSummary } from "../shared/conversation-types";
+import type {
+  RuntimeChatMessage,
+  RuntimeId,
+  RuntimePermissionId,
+  RuntimePrefs,
+  RuntimeState,
+} from "../shared/runtime-types";
+import {
+  normalizePrefs,
+  type RuntimeModelList,
+} from "../shared/runtime-types";
+import { cachedRuntimes, detectRuntimesCached, detectedAt } from "./runtime/detect";
+import { listSkills, skillsDir } from "./runtime/skills";
+import { chatWithRuntime, runtimeSkillsDir } from "./runtime/chat";
+import { modelsFor } from "./runtime/models";
+import { llmRoute } from "./llm";
+import { cancelTextCard, runTextCard, textCardOutputDir } from "./textcard";
+import type { TextCardRequest, TextCardResult } from "../shared/textcard-types";
 import type { HotItem } from "../shared/storyboard-types";
 import { createTaskSmart } from "./agent/workflows";
 import { writeDialogueScript } from "./agent/script-writer";
 import { getTask, listTasks, removeTask, saveTask } from "./agent/store";
+import {
+  appendMessage,
+  bindTask,
+  conversationOfTask,
+  createConversation,
+  getConversation,
+  listConversations,
+  removeConversation,
+  renameConversation,
+} from "./agent/conversations";
 import { cancelTask, forceRelease, runTask } from "./agent/runner";
 import {
   clearDataDir,
@@ -55,7 +81,6 @@ import {
   scheduleDataDirCleanup,
   writeDataRoot,
 } from "./userData";
-import { runVoiceConvert } from "./dialogue/voice-convert";
 import { getHotList, getHotSources } from "./hot";
 import { generateAiDraft, regenerateShotPrompt } from "./storyboard/ai";
 import * as storyStore from "./storyboard/store";
@@ -69,9 +94,7 @@ import {
   openDoubaoLogin,
   releaseDoubaoBeforeMigration,
   reloadDoubao,
-  setDoubaoBounds,
   setDoubaoVisible,
-  type DoubaoBounds,
 } from "./doubao";
 import {
   batchAutoSubmitBlocked,
@@ -105,7 +128,7 @@ import type {
 } from "../shared/record-types";
 
 /** 音色试听默认示例句 */
-const PREVIEW_TEXT = "你好，我是宝螺。今天天气不错，出来走走，心情也跟着好了起来。";
+const PREVIEW_TEXT = "你只管努力，剩下的交给时间。";
 
 /**
  * Genie 读参考音频用的是 soundfile（libsndfile），只认这些格式；
@@ -310,16 +333,19 @@ export function registerIpc() {
   ipcMain.handle(
     "app:suggestFileName",
     (_e, meta: VideoMeta): string => {
-      const base = `${safeFileName(meta.author)}-${safeFileName(meta.title, 30)}-${meta.id}`;
+      const base = `${safeFileName(meta.author)}-${safeFileName(meta.title, 30)}-${safeFileName(
+        meta.id,
+        40
+      )}`;
       return path.join(base + ".mp4");
     }
   );
 
   // ---------- 素材捕手：素材保存目录 ----------
 
-  /** 默认素材目录：C:\Baoluo\data\footage（固定短路径，用户好找） */
+  /** 默认素材目录：<数据目录>/footage（跟着数据目录走，用户好找） */
   function defaultMaterialsDir(): string {
-    return "C:\\Baoluo\\data\\footage";
+    return path.join(currentDataDir(), "footage");
   }
 
   /** 当前生效的素材目录：用户自定义 > 默认 */
@@ -351,10 +377,14 @@ export function registerIpc() {
   ipcMain.handle("media:autoSavePath", (_e, meta: VideoMeta): string => {
     const dir = currentMaterialsDir();
     fs.mkdirSync(dir, { recursive: true });
+    /*
+     * id 也要清洗：通用网页解析出来的 id 就是整条 URL（含 `://`），
+     * 直接拼进文件名在 Windows 上是非法路径，mkdir/写入会直接 ENOENT。
+     */
     const base = `${safeFileName(meta.author) || "unknown"}-${safeFileName(
       meta.title,
       30
-    )}-${meta.id}`;
+    )}-${safeFileName(meta.id, 40)}`;
     let candidate = path.join(dir, base + ".mp4");
     let n = 1;
     while (fs.existsSync(candidate)) {
@@ -489,6 +519,29 @@ export function registerIpc() {
   });
 
   ipcMain.handle("dialogue:defaultOutputDir", () => defaultOutputDir());
+
+  /* ---------------- 文字卡视频（文案 → 卡片图 → 成片） ---------------- */
+  ipcMain.handle(
+    "textcard:render",
+    async (e, req: TextCardRequest): Promise<TextCardResult> => {
+      const wc = e.sender;
+      return await runTextCard(req, (p) => {
+        try {
+          if (!wc.isDestroyed()) wc.send("textcard:progress", p);
+        } catch {
+          /* 页面已经关了，进度发不出去不影响出片 */
+        }
+      });
+    }
+  );
+
+  ipcMain.handle("textcard:cancel", (_e, requestId: string) => cancelTextCard(requestId));
+
+  ipcMain.handle("textcard:openDir", async (): Promise<{ ok: boolean; path: string; error?: string }> => {
+    const dir = textCardOutputDir();
+    const err = await shell.openPath(dir);
+    return err ? { ok: false, path: dir, error: err } : { ok: true, path: dir };
+  });
 
   ipcMain.handle(
     "dialogue:openOutputDir",
@@ -1004,150 +1057,6 @@ export function registerIpc() {
     }
   );
 
-  // -----------------------------------------------------------------
-  // 变声器（方案 A：识别原音频文案 → 用指定音色重新配音）
-  // -----------------------------------------------------------------
-
-  /** 进行中的变声任务：requestId → 取消控制器 */
-  const convertControllers = new Map<string, AbortController>();
-
-  /** 只保留最新一次的输出目录，其余删掉（与语音合成的清理策略一致） */
-  const pruneVoiceConvertDirs = (base: string, keep: string): void => {
-    try {
-      for (const d of fs.readdirSync(base)) {
-        const full = path.join(base, d);
-        if (full === keep) continue;
-        try {
-          fs.rmSync(full, { recursive: true, force: true });
-        } catch {
-          /* 被播放器占用时留给下次清理 */
-        }
-      }
-    } catch {
-      /* 清理失败不影响结果 */
-    }
-  };
-
-  /** 选择要变声的源文件（音频或视频都行，视频会自动抽音轨） */
-  ipcMain.handle("voice-convert:chooseFile", async (e): Promise<string | null> => {
-    const win = BrowserWindow.fromWebContents(e.sender) ?? BrowserWindow.getFocusedWindow();
-    const res = await dialog.showOpenDialog(win!, {
-      title: "选择要变声的音频 / 视频",
-      filters: [
-        {
-          name: "音视频文件",
-          extensions: [
-            "mp4", "webm", "mov", "mkv", "avi", "flv",
-            "mp3", "wav", "m4a", "aac", "flac", "ogg", "wma",
-          ],
-        },
-      ],
-      properties: ["openFile"],
-    });
-    if (res.canceled || !res.filePaths.length) return null;
-    return res.filePaths[0];
-  });
-
-  /**
-   * 跑一次变声：识别 → 逐句重新配音 → 拼接。
-   * 进度只发回发起方（变声器页），其余页面不受干扰。
-   */
-  ipcMain.handle(
-    "voice-convert:run",
-    async (e, req: VoiceConvertRequest): Promise<VoiceConvertResult> => {
-      if (!req?.inputPath?.trim()) throw new Error("请先选择要变声的音频或视频。");
-      if (!req.voice) throw new Error("请先选择要变的目标音色。");
-
-      const requestId = req.requestId || randomUUID();
-      const controller = new AbortController();
-      convertControllers.set(requestId, controller);
-
-      const base = path.join(app.getPath("userData"), "voice-convert-output");
-      fs.mkdirSync(base, { recursive: true });
-      const dir = path.join(base, `vc-${Date.now()}-${Math.floor(Math.random() * 10000)}`);
-      fs.mkdirSync(dir, { recursive: true });
-
-      const send = (p: VoiceConvertProgress): void => {
-        if (!e.sender.isDestroyed()) e.sender.send("voice-convert:progress", p);
-      };
-
-      try {
-        const result = await runVoiceConvert({
-          inputPath: req.inputPath,
-          voice: req.voice,
-          rate: req.rate,
-          pitch: req.pitch,
-          volume: req.volume,
-          requestId,
-          outputDir: dir,
-          signal: controller.signal,
-          onProgress: send,
-        });
-        pruneVoiceConvertDirs(base, dir);
-        return result;
-      } catch (err) {
-        // 失败/取消都不留半成品目录
-        try {
-          fs.rmSync(dir, { recursive: true, force: true });
-        } catch {
-          /* noop */
-        }
-        throw err;
-      } finally {
-        convertControllers.delete(requestId);
-      }
-    }
-  );
-
-  /** 取消进行中的变声任务 */
-  ipcMain.handle("voice-convert:cancel", (_e, requestId: string): void => {
-    convertControllers.get(requestId)?.abort();
-  });
-
-  /**
-   * 保存变声结果：选 mp3 就转码，选 wav 就直接复制。
-   * 中间产物是 32kHz 单声道 wav，体积大，所以默认给 mp3。
-   */
-  ipcMain.handle(
-    "voice-convert:saveAudio",
-    async (e, srcPath: string): Promise<string | null> => {
-      if (!srcPath || !fs.existsSync(srcPath)) throw new Error("音频文件不存在或已被删除。");
-      const win = BrowserWindow.fromWebContents(e.sender) ?? BrowserWindow.getFocusedWindow();
-      const stamp = new Date().toISOString().slice(0, 10);
-      const res = await dialog.showSaveDialog(win!, {
-        title: "保存变声结果",
-        defaultPath: `变声-${stamp}.mp3`,
-        filters: [
-          { name: "MP3 音频", extensions: ["mp3"] },
-          { name: "WAV 音频", extensions: ["wav"] },
-        ],
-      });
-      if (res.canceled || !res.filePath) return null;
-
-      const wantMp3 = !res.filePath.toLowerCase().endsWith(".wav");
-      const dest = res.filePath.toLowerCase().endsWith(wantMp3 ? ".mp3" : ".wav")
-        ? res.filePath
-        : `${res.filePath}${wantMp3 ? ".mp3" : ".wav"}`;
-      if (!wantMp3) {
-        fs.copyFileSync(srcPath, dest);
-        return dest;
-      }
-      const r = await runFfmpeg([
-        "-y",
-        "-i",
-        srcPath,
-        "-codec:a",
-        "libmp3lame",
-        "-q:a",
-        "2",
-        dest,
-      ]);
-      if (r.code !== 0 || !fs.existsSync(dest)) {
-        throw new Error("转成 MP3 失败，可以改选 WAV 再保存一次。");
-      }
-      return dest;
-    }
-  );
 
   /** 语音识别：选择本地音频/视频文件 */
   ipcMain.handle("asr:chooseFile", async (e): Promise<string | null> => {
@@ -1359,19 +1268,11 @@ export function registerIpc() {
 
   ipcMain.handle("doubao:batchState", () => getBatchState());
 
-  /** 打开 / 关闭抽屉；打开时才创建视图并发起网络请求 */
+  /** 打开 / 关闭独立豆包窗口；打开时才创建窗口并发起网络请求 */
   ipcMain.handle("doubao:setVisible", (e, visible: boolean) => {
     const win = BrowserWindow.fromWebContents(e.sender);
     if (!win) return getDoubaoState();
     return setDoubaoVisible(win, !!visible);
-  });
-
-  /**
-   * 抽屉的位置由渲染层量 DOM 后送过来——WebContentsView 是原生子视图，
-   * 不参与 HTML 布局，只能靠 JS 把坐标同步过去。
-   */
-  ipcMain.handle("doubao:setBounds", (_e, bounds: DoubaoBounds) => {
-    setDoubaoBounds(bounds);
   });
 
   ipcMain.handle("doubao:state", () => getDoubaoState());
@@ -1506,6 +1407,41 @@ export function registerIpc() {
     removeTask(id);
   });
 
+  /* ---------- 会话：左栏一列现在是「一件事一条」，不再是「一句话一条」 ---------- */
+  ipcMain.handle("conv:list", (): ConversationSummary[] => listConversations());
+  ipcMain.handle("conv:get", (_e, id: string): Conversation | null => getConversation(id));
+  ipcMain.handle("conv:create", (_e, seed?: string): Conversation => createConversation(seed ?? ""));
+  /** 任务卡属于哪条会话（老入口按任务 id 找会话时用） */
+  ipcMain.handle("conv:ofTask", (_e, taskId: string): Conversation | null => conversationOfTask(taskId));
+  ipcMain.handle(
+    "conv:append",
+    (
+      _e,
+      req: {
+        convId: string;
+        message: { role: "user" | "assistant"; text: string; images?: string[]; taskId?: string };
+      }
+    ): Conversation | null => appendMessage(req.convId, req.message)
+  );
+  ipcMain.handle("conv:bindTask", (_e, req: { convId: string; taskId: string }): Conversation | null =>
+    bindTask(req.convId, req.taskId)
+  );
+  ipcMain.handle("conv:rename", (_e, req: { convId: string; title: string }): Conversation | null =>
+    renameConversation(req.convId, req.title)
+  );
+  /** 删会话 = 删这件事：连同它产出的任务卡一起收掉，不留半张卡在硬盘里 */
+  ipcMain.handle("conv:remove", (_e, id: string): void => {
+    const conv = getConversation(id);
+    if (conv) {
+      for (const taskId of conv.taskIds) {
+        cancelTask(taskId);
+        forceRelease(taskId);
+        removeTask(taskId);
+      }
+    }
+    removeConversation(id);
+  });
+
   /** 改步骤参数：改完这一步和后面都回到未开始 */
   ipcMain.handle(
     "agent:updateParams",
@@ -1532,10 +1468,24 @@ export function registerIpc() {
    */
   ipcMain.handle(
     "agent:patchState",
-    (_e, req: { taskId: string; patch: { storyboardId?: string; hotRanAt?: number } }): AgentTask => {
+    (
+      _e,
+      req: {
+        taskId: string;
+        patch: {
+          storyboardId?: string;
+          hotRanAt?: number;
+          /** 工作区卡（内嵌分镜工作台）跑完后把任务落成 done/failed（它不走 agent:run） */
+          status?: AgentTask["status"];
+        };
+      }
+    ): AgentTask => {
       const task = getTask(req.taskId);
       if (!task) throw new Error("任务不存在。");
-      task.state = { ...(task.state ?? {}), ...req.patch };
+      // status 是任务级字段，别混进 state 里
+      const { status, ...statePatch } = req.patch;
+      task.state = { ...(task.state ?? {}), ...statePatch };
+      if (status) task.status = status;
       task.updatedAt = Date.now();
       return saveTask(task);
     }
@@ -1580,5 +1530,110 @@ export function registerIpc() {
     const target = path.resolve(p);
     if (fs.existsSync(target)) shell.showItemInFolder(target);
   });
+
+  // -----------------------------------------------------------------
+  // 集成运行时（设置 → 运行时）：识别本机智能体 CLI，全局只应用一个
+  // -----------------------------------------------------------------
+
+  const RUNTIME_IDS: RuntimeId[] = ["codex", "claude", "gemini"];
+
+  /** 界面上「运行时」页需要的一切（已应用 + 识别结果 + 技能） */
+  function runtimeState(): RuntimeState {
+    const app0 = settings.getAppSettings();
+    const active = app0.runtime?.activeId ?? null;
+    const activeId = active && RUNTIME_IDS.includes(active) ? active : null;
+    const prefs = normalizePrefs(activeId ? app0.runtime?.prefs?.[activeId] : null);
+    return {
+      activeId,
+      detected: cachedRuntimes(),
+      skills: listSkills(),
+      skillsDir: skillsDir(),
+      detectedAt: detectedAt(),
+      model: prefs.model,
+      permission: prefs.permission,
+    };
+  }
+
+  ipcMain.handle("runtime:state", (): RuntimeState => runtimeState());
+
+  /**
+   * 文案/分镜由谁写：应用了运行时就是它，没接运行时才回落到「AI 服务」。
+   * 界面拿它决定提示语（别再劝用户去填 Key）和②区那行引擎说明。
+   */
+  ipcMain.handle("llm:route", () => llmRoute());
+
+  /** 扫一遍本机（强制：用户点「识别 / 重新识别」才走这里） */
+  ipcMain.handle("runtime:detect", async (): Promise<RuntimeState> => {
+    await detectRuntimesCached(true);
+    return runtimeState();
+  });
+
+  /**
+   * 应用 / 取消应用。同一时间只有一个：写新的会直接覆盖旧的。
+   * 传 null 只在"已应用的那个已经从本机卸载了"时用（界面上才会出现这颗按钮）。
+   */
+  ipcMain.handle("runtime:apply", async (_e, id: string | null): Promise<RuntimeState> => {
+    if (id === null) {
+      settings.updateAppSettings({ runtime: undefined });
+      return runtimeState();
+    }
+    if (!RUNTIME_IDS.includes(id as RuntimeId)) throw new Error("不认识的运行时。");
+    const info = (await detectRuntimesCached()).find((r) => r.id === id);
+    if (!info) throw new Error("没识别到这个运行时，先点「重新识别」。");
+    if (info.status !== "ready") {
+      throw new Error(`这个运行时现在起不来：${info.note ?? "路径失效"}。`);
+    }
+    settings.updateAppSettings({
+      runtime: { activeId: info.id, prefs: settings.getAppSettings().runtime?.prefs },
+    });
+    return runtimeState();
+  });
+
+  /**
+   * 对话区底部那两颗选择器：模型 + 权限范围。
+   * 只改**已应用**这个运行时的偏好，别的运行时那份原样留着（换回去还在）。
+   */
+  ipcMain.handle(
+    "runtime:prefs",
+    (_e, patch: { model?: string | null; permission?: RuntimePermissionId }): RuntimeState => {
+      const cur = settings.getAppSettings().runtime;
+      if (!cur?.activeId) throw new Error("还没应用运行时。");
+      const id = cur.activeId;
+      const prev = normalizePrefs(cur.prefs?.[id]);
+      const next: RuntimePrefs = normalizePrefs({
+        model: "model" in (patch ?? {}) ? (patch.model ?? null) : prev.model,
+        permission: patch?.permission ?? prev.permission,
+      });
+      settings.updateAppSettings({
+        runtime: { activeId: id, prefs: { ...(cur.prefs ?? {}), [id]: next } },
+      });
+      return runtimeState();
+    }
+  );
+
+  /**
+   * 模型清单：**现读 CLI 自己的配置**（codex 的目录文件 / claude 的 modelPicker），
+   * 不在本地存账本 —— 账本是事实的副本，换网关当天就过期了。
+   */
+  ipcMain.handle(
+    "runtime:models",
+    async (_e, id?: string, force?: boolean): Promise<RuntimeModelList> => {
+      const active = settings.getAppSettings().runtime?.activeId ?? null;
+      const target = (id ?? active) as RuntimeId | null;
+      if (!target || !RUNTIME_IDS.includes(target)) throw new Error("还没应用运行时。");
+      return modelsFor(target, force === true);
+    }
+  );
+
+  /** 打开技能目录（没有就建出来，用户往里丢 `技能名/SKILL.md` 即可） */
+  ipcMain.handle("runtime:openSkillsDir", async (): Promise<void> => {
+    const err = await shell.openPath(runtimeSkillsDir());
+    if (err) throw new Error(err);
+  });
+
+  /** 对话区：把这一轮对话交给已应用的运行时，跑完回一条话（可能带一张建好的任务卡） */
+  ipcMain.handle("runtime:chat", async (_e, req: { messages: RuntimeChatMessage[] }) =>
+    chatWithRuntime(req.messages ?? [])
+  );
 
 }

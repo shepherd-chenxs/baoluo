@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { DragEvent, ReactNode } from "react";
+import type { DragEvent } from "react";
 import { usePageActive } from "../components/KeepAlive";
 import { HourglassIcon, SpeakerIcon } from "../components/VoiceIcons";
+import { ttsErrorText } from "../lib/err-text";
 import type {
   BeeApi,
   DialogueApi,
@@ -25,9 +26,9 @@ import { effectiveFavoriteVoices, VOICE_OPTIONS } from "../../shared/voices";
 import BeeSelect from "../components/BeeSelect";
 import { useConfirm } from "../components/ConfirmDialog";
 import ShotRecorder from "../components/workspace/ShotRecorder";
-import SideList, { SideRow, formatListTime } from "../components/SideList";
+import SideList, { ListAddButton, SideRow, formatListTime } from "../components/SideList";
 import type { RecordsApi } from "../../preload";
-import type { WorkRecordSummary } from "../../shared/record-types";
+import type { WorkRecordKind, WorkRecordSummary } from "../../shared/record-types";
 
 /**
  * 一条记录里存什么：够把编辑器恢复成当时的样子就行。
@@ -133,7 +134,8 @@ const MODE_META: Record<VideoMode, { title: string; subtitle: string; defaultScr
  * 页面草稿（自动保存，防手滑）：
  *   两人对话 → 脚本文本；图文解说 → 整个分镜列表（图 + 解说词）。
  * 拆成两个页面后，切页面会重新挂载组件，不留草稿会把正在写的内容丢掉。
- * 模板配置（画布/音色/运镜）走 savedTemplates，不受这里影响。
+ * 模板库（对话/分镜模板）在 records 里，不受这里影响；「当前套用的是哪份模板」
+ * 的来路 id 跟着草稿一起存（见下面的 templateId）。
  */
 interface ModeDraft {
   script?: string;
@@ -186,11 +188,9 @@ type PreviewStatus =
 interface DialogueViewProps {
   /** 页面模式：由侧边栏子菜单决定，页内不再切换（切换即换页面） */
   mode: VideoMode;
-  /** 左栏顶部的导航块（App 传下来的 SideNav） */
-  nav?: ReactNode;
 }
 
-export default function DialogueView({ mode, nav }: DialogueViewProps) {
+export default function DialogueView({ mode }: DialogueViewProps) {
   /** 页面被保活后离开视野的实例仍在运行：进度广播只让当前显示的那份消费 */
   const pageActive = usePageActive();
   /** 删除记录前先问一句（应用内确认框，不用原生 confirm） */
@@ -202,7 +202,6 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
   const [motionRoleB, setMotionRoleB] = useState<MotionConfig>({ mode: "zoom-in", amount: 25 });
   const [motionPerImage, setMotionPerImage] = useState(false);
   const [imageMotions, setImageMotions] = useState<MotionConfig[]>([]);
-  const [configCollapsed, setConfigCollapsed] = useState(false);
   /** 两人对话：AI 写脚本的主题（跟脚本一起进草稿，切页面不丢） */
   const [topic, setTopic] = useState(() => loadDraft(mode)?.topic ?? "");
   /** 想让成片多长：AI 按这个秒数决定写几行、多少字 */
@@ -227,9 +226,6 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
   );
   /** 分镜图片的显示 URL（path → blob/file url），分镜卡片直接用它渲染缩略图 */
   const [sceneUrls, setSceneUrls] = useState<Record<string, string>>({});
-  const [savedTemplates, setSavedTemplates] = useState<
-    Partial<Record<VideoMode, TemplateConfig>>
-  >({});
   const [settings, setSettings] = useState<DialogueSettings | null>(null);
   const [parsedLines, setParsedLines] = useState<DialogueLine[]>([]);
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
@@ -257,11 +253,20 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
    * 右区显示哪一块：编辑器 / 对话模板库。
    * 模板库挂在左栏标题下面那个入口上（只对话模式有），点了把右区换过去，左栏的列表不动。
    */
-  const [pane, setPane] = useState<"edit" | "templates">("edit");
+  /** 模板管理弹窗开关（改名 / 删除 / 设默认）；原来是独立一页 */
+  const [tplMgrOpen, setTplMgrOpen] = useState(false);
+  /**
+   * 「使用模板」开关（对话模式 / 图文解说共用，存在 AppSettings 里）。
+   * 关着 = 界面上没有任何模板按钮，只剩画布 / 分镜本身的配置；
+   * 打开后才露出模板入口。只是显隐，不删数据。
+   */
+  const [tplEnabled, setTplEnabled] = useState(false);
   /** 模板库：一条 = 一份命名好的配置（形象图/音色/运镜/比例） */
   const [templates, setTemplates] = useState<WorkRecordSummary[]>([]);
   /** 「存为新模板」那个输入框里的名字 */
   const [tplName, setTplName] = useState("");
+  /** 「自定义模板」命名小窗：点下拉里的「＋ 自定义模板…」时弹出，就地存新模板 */
+  const [newTplOpen, setNewTplOpen] = useState(false);
   /**
    * 编辑器当前"基于"哪份模板 = 这条路是从哪开始的：
    *   - 直接「＋新建」→ null → 头上那颗按钮是「保存模板」（存成新的一份）
@@ -284,12 +289,22 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
     payload: TemplateConfig;
   } | null>(null);
 
+  /**
+   * 模板记录的 kind：对话模板（一套配音/运镜配置）与分镜模板（跟着镜头走）
+   * 分开存，列表、应用互不串。逻辑完全同构，差别只在存哪份文件。
+   */
+  const tplKind: WorkRecordKind =
+    mode === "narration" ? "narration-template" : "template";
+
   const reloadTemplates = useCallback(async () => {
     try {
       const [list, appSet, builtin] = await Promise.all([
-        window.records.list("template"),
+        window.records.list(mode === "narration" ? "narration-template" : "template"),
         window.settings.get(),
-        window.dialogue.builtinTemplate().catch(() => null),
+        // 内置模板只有对话模式有；图文解说拿不到就当没有
+        mode === "dialogue"
+          ? window.dialogue.builtinTemplate().catch(() => null)
+          : Promise.resolve(null),
       ]);
       setTemplates(list);
       setBuiltinTpl(builtin);
@@ -297,7 +312,7 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
     } catch {
       /* 拉不到就空着，不影响编辑 */
     }
-  }, []);
+  }, [mode]);
 
   /** 把某份模板设为/取消默认（工作台建对话卡时套用它） */
   async function toggleDefaultTemplate(id: string): Promise<void> {
@@ -316,6 +331,24 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
     if (!pageActive) return;
     void reloadTemplates();
   }, [pageActive, reloadTemplates]);
+
+  /**
+   * 「使用模板」开关：只切界面显隐。
+   * 关掉时顺手把两个模板弹窗收掉，否则弹窗还挂在屏幕上、按钮却没了，关不掉也找不到入口。
+   */
+  async function toggleTemplates(): Promise<void> {
+    const next = !tplEnabled;
+    setTplEnabled(next);
+    if (!next) {
+      setTplMgrOpen(false);
+      setNewTplOpen(false);
+    }
+    try {
+      await window.settings.update({ templatesEnabled: next });
+    } catch {
+      /* 写盘失败就算了：界面已经切过去，下次再点还会写 */
+    }
+  }
 
   const reloadRecords = useCallback(async () => {
     try {
@@ -436,11 +469,8 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
       setCurrentRecordId(rec.id);
       // 这条记录带着自己的配置，跟模板库没关系了 → 来路清掉，按钮回到「保存模板」
       setAppliedTemplateId(null);
-      /*
-       * 右区必须切回编辑器：点记录就是想改它。
-       * 不切的话右区可能还停在模板库，点了像没反应（只有状态被悄悄换掉）。
-       */
-      setPane("edit");
+      // 模板管理弹窗还开着的话收掉：点记录就是想改它，别被弹窗挡着
+      setTplMgrOpen(false);
       // 成片也一起回显：这条记录当时出过片，就直接能看
       setOutputPath(rec.outputPath ?? null);
       setPreviewUrl(rec.outputPath ? await window.media.toUrl(rec.outputPath) : "");
@@ -490,8 +520,8 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
      * 而且草稿 500ms 后又把这条来路写回去——重载还在（踩过）。
      */
     setAppliedTemplateId(null);
-    // 新建就是要编辑：右区若停在模板库，一起切回来（否则点了看着没反应）
-    setPane("edit");
+    // 新建就是要编辑：模板管理弹窗若开着，顺手收掉
+    setTplMgrOpen(false);
     try {
       localStorage.removeItem(draftKey(mode));
     } catch {
@@ -511,6 +541,12 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
 
   /** 模板在列表上的摘要：一眼看出这套配置是什么声音、什么画面 */
   function templateSummary(cfg: TemplateConfig): string {
+    // 分镜模板：内容跟着镜头走，镜头数就是它最要紧的信息
+    if (mode === "narration") {
+      return `${cfg.images?.length ?? 0} 个镜头 · ${
+        cfg.resolution === "landscape" ? "横屏" : "竖屏"
+      }`;
+    }
     const a = cfg.voices?.voiceFortune ?? "";
     const b = cfg.voices?.voiceCustomer ?? "";
     const dir = cfg.resolution === "landscape" ? "横屏" : "竖屏";
@@ -529,7 +565,7 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
     try {
       const saved = await window.records.save({
         id,
-        kind: "template",
+        kind: tplKind,
         title: name,
         subtitle: templateSummary(cfg),
         payload: cfg,
@@ -543,19 +579,10 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
   }
 
   /**
-   * 编辑器卡片头上那颗按钮。
-   * 从模板应用来的 → 写回那一份；直接新建的 → 去模板库起名字存新的一份。
-   * （不在这里弹输入框：模板库就是管名字的地方，一处入口更不容易混。）
+   * 当前套用的用户模板（内置模板不在 templates 里，套内置时这里是 undefined →
+   * 「更新」按钮置灰，只能「保存」另存一份）。
    */
-  async function saveTemplate(): Promise<void> {
-    const cur = templates.find((t) => t.id === appliedTemplateId);
-    if (cur) {
-      await saveTemplateConfig(cur.id, cur.title);
-      return;
-    }
-    setPane("templates");
-    setTplName((n) => n || topic.trim() || "");
-  }
+  const curTpl = templates.find((t) => t.id === appliedTemplateId);
 
   /** 模板库里起好名字后，存成一份新模板 */
   async function saveAsTemplate(): Promise<void> {
@@ -571,15 +598,27 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
     }
   }
 
+  /** 下拉里「＋ 自定义模板…」的命名小窗：就地存新模板并应用（不用跳模板库页） */
+  async function saveNewTemplate(): Promise<void> {
+    const name = tplName.trim();
+    if (!name) return;
+    const id = await saveTemplateConfig(undefined, name);
+    if (id) {
+      setTplName("");
+      setAppliedTemplateId(id);
+      setNewTplOpen(false);
+    }
+  }
+
   async function renameTemplate(id: string, name: string): Promise<void> {
     const next = name.trim();
     if (!next) return;
     try {
-      const rec = await window.records.get<TemplateConfig>("template", id);
+      const rec = await window.records.get<TemplateConfig>(tplKind, id);
       if (!rec) return;
       await window.records.save({
         id,
-        kind: "template",
+        kind: tplKind,
         title: next,
         subtitle: rec.subtitle,
         outputPath: rec.outputPath,
@@ -598,18 +637,16 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
     if (builtinTpl && id === builtinTpl.id) {
       applyConfig(builtinTpl.payload);
       setAppliedTemplateId(builtinTpl.id);
-      setPane("edit");
       return;
     }
     try {
-      const rec = await window.records.get<TemplateConfig>("template", id);
+      const rec = await window.records.get<TemplateConfig>(tplKind, id);
       if (!rec) {
         await reloadTemplates();
         return;
       }
       applyConfig(rec.payload);
       setAppliedTemplateId(rec.id);
-      setPane("edit");
     } catch (e: any) {
       setError(e?.message ?? String(e));
     }
@@ -618,7 +655,7 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
   async function removeTemplate(id: string, name: string): Promise<void> {
     if (!window.confirm(`确定删除模板「${name}」吗？`)) return;
     try {
-      await window.records.remove("template", id);
+      await window.records.remove(tplKind, id);
       // 删掉的正是当前这份：把标记收掉，别指着一个已经不在的 id
       if (appliedTemplateId === id) setAppliedTemplateId(null);
     } catch {
@@ -640,6 +677,8 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
           const app = await window.settings.get();
           if (app.outputDir) od = app.outputDir;
           saved = app.savedTemplates ?? {};
+          // 「使用模板」开关：未设置 = 关（默认界面不露模板按钮）
+          setTplEnabled(!!app.templatesEnabled);
           const favs = effectiveFavoriteVoices(app.favoriteVoices);
           const clones = (app.cloneVoices ?? []).map((v) => ({
             value: `clone:${v.id}`,
@@ -651,14 +690,28 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
         } catch {
           /* 用默认路径 */
         }
-        setSavedTemplates(saved);
         setOutputDir(od);
         /*
-         * 图文解说：启动时套用本页已保存的分镜（那页的「保存模板」存的就是这批镜头）。
-         * 对话模式不再自动套用任何模板——模板要"点应用"才生效（两条路：直接新建 / 应用模板），
-         * 上次的配置由草稿恢复（见下面的 loadDraft）。
+         * 旧版图文解说的「保存模板」只存一份无名默认（savedTemplates.narration）。
+         * 模板改成库逻辑后它进不了列表，这里一次性搬成一条命名模板，再把旧字段删掉——
+         * 数据不丢，要不要套由用户在模板弹窗里点「应用」。
+         * 对话模式本来就不自动套模板，图文解说现在也对齐：上次的配置由草稿恢复（见下面的 loadDraft）。
          */
-        if (mode === "narration" && saved[mode]) applyConfig(saved[mode], s);
+        if (mode === "narration" && saved.narration) {
+          try {
+            await window.records.save({
+              kind: "narration-template",
+              title: "原默认分镜",
+              subtitle: `${saved.narration.images?.length ?? 0} 个镜头`,
+              payload: saved.narration,
+            });
+            const next = { ...saved };
+            delete next.narration;
+            await window.settings.update({ savedTemplates: next });
+          } catch {
+            /* 搬不动就留在原地，不影响使用 */
+          }
+        }
         // 草稿是本页面最后在写的内容，比模板里存的旧内容更新，优先恢复
         const draft = loadDraft(mode);
         if (draft?.scenes?.length) setScenes(draft.scenes);
@@ -726,7 +779,7 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
       try {
         const payload: ModeDraft =
           mode === "narration"
-            ? { scenes, narrators: sceneNarrators }
+            ? { scenes, narrators: sceneNarrators, templateId: appliedTemplateId }
             : {
                 script,
                 topic,
@@ -1008,28 +1061,6 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
     setError(null);
   }
 
-  /**
-   * 图文解说的「保存模板」：把这批镜头（图 + 解说词 + 解说员）存成本页面的默认分镜。
-   *
-   * 它不进对话模板库——那边是"一套配音/运镜配置"，图文解说的内容跟着镜头走，
-   * 混在一起反而说不清一份模板到底管什么（这也是原来两套概念容易混的根源之一）。
-   */
-  async function saveNarrationTemplate(): Promise<void> {
-    if (!settings) return;
-    setError(null);
-    const cfg = collectConfig();
-    if (!cfg) return;
-    try {
-      const cur = await window.settings.get();
-      const r = await window.settings.update({
-        savedTemplates: { ...cur.savedTemplates, narration: cfg },
-      });
-      setSavedTemplates(r.savedTemplates ?? {});
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    }
-  }
-
   /** 重置：删掉这个页面的默认模板配置（以及草稿），恢复默认 */  async function clearTemplate(kind: VideoMode) {
     if (
       !(await confirmDelete({
@@ -1044,8 +1075,7 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
       const cur = await window.settings.get();
       const next = { ...cur.savedTemplates };
       delete next[kind];
-      const r = await window.settings.update({ savedTemplates: next });
-      setSavedTemplates(r.savedTemplates ?? {});
+      await window.settings.update({ savedTemplates: next });
       // 草稿也一起清掉，否则下次进页面又把重置前的内容恢复出来
       try {
         localStorage.removeItem(draftKey(kind));
@@ -1072,6 +1102,8 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
          */
         setScenes([{ path: "", text: "" }]);
         setSceneNarrators([]);
+        // 重置后的空分镜不再对应任何模板：来路清掉，按钮回到「保存为模板」
+        setAppliedTemplateId(null);
       }
       setOutputPath(null);
       setPreviewUrl("");
@@ -1298,10 +1330,7 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
         setPreviewStatus({ voice, state: "playing" });
       })
       .catch((e) => {
-        const msg = e?.message ?? String(e);
-        const friendly = /timeout|timed out/i.test(msg)
-          ? "该音色当前不可用（合成超时），请换个音色试试。"
-          : msg;
+        const friendly = ttsErrorText(e);
         setPreviewStatus({ voice, state: "error", message: friendly });
         window.alert(friendly);
       })
@@ -1328,29 +1357,17 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
   }
 
   return (
-    /* 整屏分左右两区：左区是标题 + 历史记录，右区是编辑器（骨架与另外三页共用，见 SideList） */
+    /* 左栏是记录列表（用户要求挪回左边），右区是编辑器，全宽铺开 */
     <div className="view dialogue-view">
       <SideList
-        nav={nav}
         section="记录"
         action={
-          <button
-            type="button"
-            className="secondary small"
+          <ListAddButton
             onClick={startFresh}
             title="清空编辑器，从头做一份新的（不动已有记录）"
-          >
-            ＋ 新建
-          </button>
+          />
         }
         hasItems={records.length > 0}
-        empty={
-          <>
-            {mode === "dialogue"
-              ? "还没有记录。右边写好主题点「AI 写脚本」，这条就会进列表。"
-              : "还没有记录。右边给每个镜头放上图、写好解说词，点合成就会进列表。"}
-          </>
-        }
         items={records.map((r) => (
           <SideRow
             key={r.id}
@@ -1364,147 +1381,14 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
             deleteLabel={`删除记录 ${r.title}`}
           />
         ))}
+        empty={
+          mode === "dialogue"
+            ? "还没有记录。在右边写好主题点「AI 写脚本」，这条就会进列表。"
+            : "还没有记录。在右边给每个镜头放上图、写好解说词，点合成就会进列表。"
+        }
       >
-      {/* 页名放右区顶部（跟其他内容页一致）；左栏只留导航 + 记录列表 */}
+      {/* 页名放编辑区顶部；记录列表在左栏 */}
       <h2 className="work-title">{MODE_META[mode].title}</h2>
-      {pane === "templates" ? (
-        <section className="card-pad tpl-manager">
-          <div className="panel-title-row">
-            <span className="panel-title">🧩 对话模板</span>
-          </div>
-
-          <div className="tpl-new-row">
-            <input
-              className="tpl-name-input"
-              value={tplName}
-              placeholder="给这套配置起个名字，例如：温馨情感 / 职场犀利"
-              maxLength={40}
-              onChange={(e) => setTplName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void saveAsTemplate();
-                }
-              }}
-            />
-            <button
-              type="button"
-              className="primary small"
-              disabled={!tplName.trim()}
-              onClick={() => void saveAsTemplate()}
-              title="把编辑器里当前的配置存成一份新模板"
-            >
-              ＋ 保存为模板
-            </button>
-            <button type="button" className="secondary small" onClick={() => setPane("edit")}>
-              返回编辑
-            </button>
-          </div>
-
-          {/* 内置模板：应用自带，只能用不能改。没设自己的默认时，工作台建卡就走它 */}
-          {builtinTpl && (
-            <div className="tpl-card tpl-card-builtin">
-              <div className="tpl-card-main">
-                <span className="tpl-card-title-row">
-                  <span className="tpl-card-name is-static">{builtinTpl.title}</span>
-                  <span className="tpl-default-chip is-builtin" title="应用自带，不能删除或修改">
-                    内置
-                  </span>
-                  {!defaultTemplateId && (
-                    <span className="tpl-default-chip is-default" title="没设自己的默认模板时，工作台建卡就用它">
-                      默认
-                    </span>
-                  )}
-                  {appliedTemplateId === builtinTpl.id && (
-                    <span className="tpl-default-chip">使用中</span>
-                  )}
-                </span>
-                <span className="tpl-card-meta">{builtinTpl.subtitle}</span>
-              </div>
-              <div className="tpl-card-actions">
-                <button
-                  type="button"
-                  className="primary small"
-                  onClick={() => void applyTemplate(builtinTpl.id)}
-                  title="把这套配置套到编辑器上（套完自动切回编辑，可继续改；改完用「保存模板」存成自己的一份）"
-                >
-                  应用
-                </button>
-              </div>
-            </div>
-          )}
-
-          {templates.length === 0 ? (
-            <div className="story-empty">
-              还没有自己的模板。上面起个名字点「＋ 存为模板」，就会把当前的配音与运镜配置存下来。
-            </div>
-          ) : (
-            <div className="tpl-list">
-              {templates.map((t) => (
-                <div className="tpl-card" key={t.id}>
-                  <div className="tpl-card-main">
-                    <span className="tpl-card-title-row">
-                      <input
-                        className="tpl-card-name"
-                        defaultValue={t.title}
-                        maxLength={40}
-                        title="改完点别处或按回车即改名"
-                        onBlur={(e) => {
-                          if (e.target.value.trim() !== t.title)
-                            void renameTemplate(t.id, e.target.value);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                        }}
-                      />
-                      {appliedTemplateId === t.id && <span className="tpl-default-chip">使用中</span>}
-                      {defaultTemplateId === t.id && (
-                        <span className="tpl-default-chip is-default" title="工作台建「对话视频」时自动套用这套配置">
-                          默认
-                        </span>
-                      )}
-                    </span>
-                    <span className="tpl-card-meta">
-                      {t.subtitle}
-                      <span className="tpl-card-time">{formatListTime(t.updatedAt)}</span>
-                    </span>
-                  </div>
-                  <div className="tpl-card-actions">
-                    <button
-                      type="button"
-                      className="primary small"
-                      onClick={() => void applyTemplate(t.id)}
-                      title="把这套配置套到编辑器上（套完自动切回编辑）"
-                    >
-                      应用
-                    </button>
-                    <button
-                      type="button"
-                      className={`secondary small secondary-plain${defaultTemplateId === t.id ? " is-default" : ""}`}
-                      onClick={() => void toggleDefaultTemplate(t.id)}
-                      title={
-                        defaultTemplateId === t.id
-                          ? "取消默认（工作台建卡就按设置里的默认值来）"
-                          : "设为默认：工作台建「对话视频」卡时自动套用这套配置"
-                      }
-                    >
-                      {defaultTemplateId === t.id ? "取消默认" : "设为默认"}
-                    </button>
-                    <button
-                      type="button"
-                      className="danger small"
-                      onClick={() => void removeTemplate(t.id, t.title)}
-                    >
-                      删除
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      ) : (
-      <>
         <div className="template-layout">
         {/* 模板配置 + 生成（原左侧模板菜单已上移到侧边栏「视频生成」的子菜单） */}
         <div className="template-content">
@@ -1514,50 +1398,88 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
           */}
           {mode === "dialogue" && (
             <div className="card-pad flat-panel">
-              <div className="collapse-header" onClick={() => setConfigCollapsed((c) => !c)}>
-                <span className="panel-title">🧩 模板配置</span>
-                {/* 保存/重置是整页的收尾动作，跟在标题右边；点它们不该顺带把配置折叠起来 */}
+              <div className="collapse-header">
+                {/* 标题带上当前模板名：套了模板显示「画布（xx）」，没套就只是「画布」（内置模板也算） */}
+                <span className="panel-title">
+                  🎨 画布
+                  {tplEnabled &&
+                    (appliedTemplateId === builtinTpl?.id
+                      ? `（${builtinTpl.title}）`
+                      : curTpl
+                        ? `（${curTpl.title}）`
+                        : "")}
+                </span>
+                {/* 管理/保存/更新/重置跟在标题右边 */}
                 <span className="collapse-header-actions">
-                  {/*
-                    模板库入口摆在这里（「保存模板」左边）：读模板、存模板是同一件事的两面，
-                    摆一排语义最顺，左栏也少占一整行。库里有「返回编辑」回来。
-                  */}
-                  <button
-                    type="button"
-                    className="secondary small secondary-plain"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPane("templates");
-                    }}
-                    title="攒几套常用的配音/运镜配置，随时切"
-                  >
-                    🧩 对话模板{` (${templates.length})`}
-                  </button>
-                  {/*
-                    这块原来还有一行「基于「xx」」，去掉了：按钮上写的就是「更新「xx」」，
-                    同一个信息说两遍。模板库里那份另有「使用中」标记，那边才需要它。
-                  */}
-                  <button
-                    type="button"
-                    className="secondary small secondary-plain"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void saveTemplate();
-                    }}
-                    title={
-                      appliedTemplateId === builtinTpl?.id
-                        ? "内置模板改不了：去模板库起个名字，把这套配置存成自己的模板"
-                        : appliedTemplateId
-                          ? "把当前的配音与运镜配置写回这份模板"
-                          : "去模板库给这套配置起个名字存下来"
-                    }
-                  >
-                    {(() => {
-                      // 内置模板不在用户模板列表里 → 走到「保存模板」分支（另存为新的一份）
-                      const cur = templates.find((t) => t.id === appliedTemplateId);
-                      return cur ? `更新「${cur.title}」` : "保存模板";
-                    })()}
-                  </button>
+                  {/* 开关：关掉后下面三颗模板按钮全部不渲染，只留画布本身 */}
+                  <span className="tpl-toggle">
+                    <span className="tpl-toggle-label">使用模板</span>
+                    <button
+                      type="button"
+                      className={`plugin-switch is-sm${tplEnabled ? " on" : ""}`}
+                      role="switch"
+                      aria-checked={tplEnabled}
+                      aria-label="使用模板"
+                      title={
+                        tplEnabled
+                          ? "关掉后隐藏所有模板按钮（已保存的模板不会删）"
+                          : "打开后显示模板按钮：应用 / 保存 / 更新"
+                      }
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void toggleTemplates();
+                      }}
+                    >
+                      <span className="plugin-switch-knob" />
+                    </button>
+                  </span>
+                  {tplEnabled && (
+                    <>
+                      {/* 模板入口就这一颗：应用 / 新建 / 改名 / 删除 / 设默认都在弹窗里 */}
+                      <button
+                        type="button"
+                        className="secondary small secondary-plain"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setTplMgrOpen(true);
+                        }}
+                        title="应用 / 新建 / 改名 / 删除 / 设默认"
+                      >
+                        模板
+                      </button>
+                      {/*
+                        保存/更新二选一显示：
+                        - 套了自己的模板 → 只显示「更新模板」（写回那一份）；
+                        - 没套模板（或套的是内置模板，内置改不了）→ 只显示「保存为模板」。
+                      */}
+                      {curTpl ? (
+                        <button
+                          type="button"
+                          className="secondary small secondary-plain"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void saveTemplateConfig(curTpl.id, curTpl.title);
+                          }}
+                          title={`把当前的配音与运镜配置写回「${curTpl.title}」`}
+                        >
+                          更新模板
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="secondary small secondary-plain"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setTplName((n) => n || topic.trim() || "");
+                            setNewTplOpen(true);
+                          }}
+                          title="把当前的配音与运镜配置存成一份新模板"
+                        >
+                          保存为模板
+                        </button>
+                      )}
+                    </>
+                  )}
                   <button
                     type="button"
                     className="danger small danger-plain"
@@ -1568,15 +1490,10 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
                   >
                     重置
                   </button>
-                  <span className={`collapse-arrow ${configCollapsed ? "" : "open"}`}>
-                    {configCollapsed ? "▸" : "▾"}
-                  </span>
                 </span>
               </div>
 
-              {!configCollapsed && (
-                <>
-                  <div className="template-config">
+              <div className="template-config">
                     <RoleCard
                       label="甲方"
                     image={imageFortune}
@@ -1635,9 +1552,7 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
                         title="成片画布方向：AI 画面提示词与最终成片都按它生成"
                       />
                     </div>
-                  </div>
-                </>
-              )}
+              </div>
             </div>
           )}
 
@@ -1646,22 +1561,69 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
                flat-panel：右区去卡片化（同工作台那套），段落靠分隔线划分 */
             <div className="card-pad flat-panel">
               <div className="panel-title-row">
-                <span className="panel-title">🎬 分镜</span>
+                <span className="panel-title">
+                  🎬 分镜
+                  {/* 套了模板带上名字（内置模板只有对话模式有，这里不用管） */}
+                  {tplEnabled && curTpl ? `（${curTpl.title}）` : ""}
+                </span>
                 {/* 保存/重置挪到分镜右上角：图文解说页不再有「模板配置」，这两颗按钮得有地方待 */}
                 <span className="panel-title-actions">
-                  {savedTemplates[mode] && (
-                    <span className="status" style={{ color: "#34c759" }}>
-                      已保存 ✓
-                    </span>
+                  {/* 与对话模式共用同一个「使用模板」开关：关掉就只剩分镜本身 */}
+                  <span className="tpl-toggle">
+                    <span className="tpl-toggle-label">使用模板</span>
+                    <button
+                      type="button"
+                      className={`plugin-switch is-sm${tplEnabled ? " on" : ""}`}
+                      role="switch"
+                      aria-checked={tplEnabled}
+                      aria-label="使用模板"
+                      title={
+                        tplEnabled
+                          ? "关掉后隐藏模板按钮（已保存的模板不会删）"
+                          : "打开后显示模板按钮：应用 / 保存 / 更新"
+                      }
+                      onClick={() => void toggleTemplates()}
+                    >
+                      <span className="plugin-switch-knob" />
+                    </button>
+                  </span>
+                  {tplEnabled && (
+                    <>
+                      {/* 模板入口就这一颗：应用 / 新建 / 改名 / 删除都在弹窗里 */}
+                      <button
+                        type="button"
+                        className="secondary small secondary-plain"
+                        onClick={() => setTplMgrOpen(true)}
+                        title="应用 / 新建 / 改名 / 删除"
+                      >
+                        模板
+                      </button>
+                      {/*
+                        保存/更新二选一显示（与对话模式同一套逻辑）：
+                        - 套了自己的模板 → 只显示「更新模板」（写回那一份）；
+                        - 没套模板 → 只显示「保存为模板」。
+                      */}
+                      {curTpl ? (
+                        <button
+                          type="button"
+                          className="secondary small secondary-plain"
+                          onClick={() => void saveTemplateConfig(curTpl.id, curTpl.title)}
+                          title={`把当前的镜头与解说员配置写回「${curTpl.title}」`}
+                        >
+                          更新模板
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="secondary small secondary-plain"
+                          onClick={() => setNewTplOpen(true)}
+                          title="把这批镜头（图 + 解说词 + 解说员）存成一份模板"
+                        >
+                          保存为模板
+                        </button>
+                      )}
+                    </>
                   )}
-                  <button
-                    type="button"
-                    className="secondary small secondary-plain"
-                    onClick={() => void saveNarrationTemplate()}
-                    title="把这些镜头（图 + 解说词 + 解说员）存成本页面的默认分镜"
-                  >
-                    保存模板
-                  </button>
                   <button
                     type="button"
                     className="danger small danger-plain"
@@ -2126,11 +2088,221 @@ export default function DialogueView({ mode, nav }: DialogueViewProps) {
 
       <div className="disclaimer">
         普通音色由在线语音服务合成；克隆音色在本机合成，不联网。本地项目数据保存在
-        「设置 → 通用设置 → 数据目录」里配置的位置（默认 <code>C:\Baoluo\data</code>）。
+        「设置 → 通用设置 → 数据目录」里配置的位置（默认 <code>%APPDATA%\Baoluo</code>）。
       </div>
-      </>
-      )}
       </SideList>
+      {/* 「＋ 自定义模板…」的命名小窗：把编辑器当前配置存成一份新模板 */}
+      {newTplOpen && (
+        <div className="modal-overlay" onClick={() => setNewTplOpen(false)}>
+          <div
+            className="modal-card clone-modal"
+            role="dialog"
+            aria-label="新建模板"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="clone-modal-head">
+              <h3>自定义模板</h3>
+              <button type="button" className="secondary small" onClick={() => setNewTplOpen(false)}>
+                取消
+              </button>
+            </div>
+            <div className="clone-modal-body">
+              <div className="form-row">
+                <label>名称</label>
+                <input
+                  value={tplName}
+                  maxLength={40}
+                  autoFocus
+                  placeholder="给这套配置起个名字，例如：温馨情感 / 职场犀利"
+                  onChange={(e) => setTplName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void saveNewTemplate();
+                    }
+                  }}
+                />
+              </div>
+              <p className="story-muted" style={{ margin: 0 }}>
+                {mode === "narration"
+                  ? "会把当前的镜头与解说员配置存成一份新模板，保存后自动应用到编辑器。"
+                  : "会把编辑器里当前的配音 / 运镜配置存成一份新模板，保存后自动应用到编辑器。"}
+              </p>
+            </div>
+            <div className="clone-modal-actions">
+              <button
+                type="button"
+                className="primary"
+                disabled={!tplName.trim()}
+                onClick={() => void saveNewTemplate()}
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* 模板弹窗：应用 / 新建 / 改名 / 删除 / 设默认（点标题行的「模板」按钮弹出） */}
+      {tplMgrOpen && (
+        <div className="modal-overlay" onClick={() => setTplMgrOpen(false)}>
+          <div
+            className="modal-card clone-modal tpl-mgr-modal"
+            role="dialog"
+            aria-label="模板管理"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="clone-modal-head">
+              <h3>{mode === "narration" ? "🧩 分镜模板" : "🧩 对话模板"}</h3>
+              <button type="button" className="secondary small" onClick={() => setTplMgrOpen(false)}>
+                关闭
+              </button>
+            </div>
+            <div className="clone-modal-body">
+              <div className="tpl-new-row">
+                <input
+                  className="tpl-name-input"
+                  value={tplName}
+                  placeholder="给这套配置起个名字，例如：温馨情感 / 职场犀利"
+                  maxLength={40}
+                  onChange={(e) => setTplName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void saveAsTemplate();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="primary small"
+                  disabled={!tplName.trim()}
+                  onClick={() => void saveAsTemplate()}
+                  title={
+                    mode === "narration"
+                      ? "把这批镜头（图 + 解说词 + 解说员）存成一份新模板"
+                      : "把编辑器里当前的配置存成一份新模板"
+                  }
+                >
+                  ＋ 保存为模板
+                </button>
+              </div>
+
+              {/* 内置模板：应用自带，只能用不能改。没设自己的默认时，工作台建卡就走它（仅对话模式有） */}
+              {mode === "dialogue" && builtinTpl && (
+                <div className="tpl-card tpl-card-builtin">
+                  <div className="tpl-card-main">
+                    <span className="tpl-card-title-row">
+                      <span className="tpl-card-name is-static">{builtinTpl.title}</span>
+                      <span className="tpl-default-chip is-builtin" title="应用自带，不能删除或修改">
+                        内置
+                      </span>
+                      {!defaultTemplateId && (
+                        <span className="tpl-default-chip is-default" title="没设自己的默认模板时，工作台建卡就用它">
+                          默认
+                        </span>
+                      )}
+                      {appliedTemplateId === builtinTpl.id && (
+                        <span className="tpl-default-chip">使用中</span>
+                      )}
+                    </span>
+                    <span className="tpl-card-meta">{builtinTpl.subtitle}</span>
+                  </div>
+                  <div className="tpl-card-actions">
+                    <button
+                      type="button"
+                      className="primary small"
+                      onClick={() => {
+                        void applyTemplate(builtinTpl.id);
+                        setTplMgrOpen(false);
+                      }}
+                      title="把这套配置套到编辑器上（可继续改，改完用「保存」存成自己的一份）"
+                    >
+                      应用
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {templates.length === 0 ? (
+                <div className="story-empty">
+                  {mode === "narration"
+                    ? "还没有自己的模板。上面起个名字点「＋ 保存为模板」，就会把这批镜头（图 + 解说词 + 解说员）存下来。"
+                    : "还没有自己的模板。上面起个名字点「＋ 保存为模板」，就会把当前的配音与运镜配置存下来。"}
+                </div>
+              ) : (
+                <div className="tpl-list">
+                  {templates.map((t) => (
+                    <div className="tpl-card" key={t.id}>
+                      <div className="tpl-card-main">
+                        <span className="tpl-card-title-row">
+                          <input
+                            className="tpl-card-name"
+                            defaultValue={t.title}
+                            maxLength={40}
+                            title="改完点别处或按回车即改名"
+                            onBlur={(e) => {
+                              if (e.target.value.trim() !== t.title)
+                                void renameTemplate(t.id, e.target.value);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                            }}
+                          />
+                          {appliedTemplateId === t.id && <span className="tpl-default-chip">使用中</span>}
+                          {mode === "dialogue" && defaultTemplateId === t.id && (
+                            <span className="tpl-default-chip is-default" title="工作台建「对话视频」时自动套用这套配置">
+                              默认
+                            </span>
+                          )}
+                        </span>
+                        <span className="tpl-card-meta">
+                          {t.subtitle}
+                          <span className="tpl-card-time">{formatListTime(t.updatedAt)}</span>
+                        </span>
+                      </div>
+                      <div className="tpl-card-actions">
+                        <button
+                          type="button"
+                          className="primary small"
+                          onClick={() => {
+                            void applyTemplate(t.id);
+                            setTplMgrOpen(false);
+                          }}
+                          title="把这套配置套到编辑器上"
+                        >
+                          应用
+                        </button>
+                        {/* 「设为默认」是工作台建卡的概念，分镜模板没有这条链路，不摆 */}
+                        {mode === "dialogue" && (
+                          <button
+                            type="button"
+                            className={`secondary small secondary-plain${defaultTemplateId === t.id ? " is-default" : ""}`}
+                            onClick={() => void toggleDefaultTemplate(t.id)}
+                            title={
+                              defaultTemplateId === t.id
+                                ? "取消默认（工作台建卡就按设置里的默认值来）"
+                                : "设为默认：工作台建「对话视频」卡时自动套用这套配置"
+                            }
+                          >
+                            {defaultTemplateId === t.id ? "取消默认" : "设为默认"}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="danger small"
+                          onClick={() => void removeTemplate(t.id, t.title)}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {confirmDialog}
     </div>
   );

@@ -7,6 +7,7 @@ import {
 } from "../../../shared/voices";
 import AlertModal from "../../components/AlertModal";
 import SaveResetRow from "./SaveResetRow";
+import { ttsErrorText } from "../../lib/err-text";
 
 declare global {
   interface Window {
@@ -149,10 +150,7 @@ export default function VoicesPage() {
         setPreviewStatus({ voice, state: "playing" });
       })
       .catch((e) => {
-        const msg = e?.message ?? String(e);
-        const friendly = /timeout|timed out/i.test(msg)
-          ? "该音色当前不可用（合成超时），请换个音色试试。"
-          : msg;
+        const friendly = ttsErrorText(e);
         setPreviewStatus({ voice, state: "error", message: friendly });
         setAlertMsg(friendly);
       })

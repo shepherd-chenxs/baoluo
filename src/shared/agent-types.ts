@@ -20,8 +20,6 @@ export type AgentIntent =
   | "dialogue-video"
   /** 主题 → 图文解说（v1 只提示，不自动执行） */
   | "narration-video"
-  /** 音频/视频 → 换音色重新念 */
-  | "voice-convert"
   /** 一段文字 → 用指定音色念出来 */
   | "tts"
   /** 音视频文件 → 文案 */
@@ -46,7 +44,6 @@ export type AgentStepKind =
   | "compose-narration"
   /** 热点成片/图文解说：编辑和执行都在任务卡内嵌的分镜工作台里，工具本身是空操作 */
   | "hot-story"
-  | "voice-convert"
   | "tts"
   | "sniff";
 

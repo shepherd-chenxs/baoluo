@@ -44,14 +44,16 @@ const WAIT_MS = Math.max(1, parseInt(getArg("minutes", "6"), 10) || 6) * 60_000;
 function resolveDataDir() {
   if (process.env.BAOLUO_DATA_DIR) return path.resolve(process.env.BAOLUO_DATA_DIR);
   const appData = process.env.APPDATA || path.join(process.env.USERPROFILE || "", "AppData", "Roaming");
-  for (const p of [path.join("C:\\Baoluo\\data", "data-root.txt"), path.join(appData, "Baoluo", "data-root.txt")]) {
+  // 默认目录 %APPDATA%\Baoluo 优先，老版本留下的 C:\Baoluo\data 其次
+  for (const p of [path.join(appData, "Baoluo", "data-root.txt"), path.join("C:\\Baoluo\\data", "data-root.txt")]) {
     try {
       const raw = fs.readFileSync(p, "utf-8").trim();
       if (raw && fs.existsSync(raw)) return path.resolve(raw);
     } catch {}
   }
   try {
-    if (fs.existsSync("C:\\Baoluo\\data")) return "C:\\Baoluo\\data";
+    // 老版本默认目录里已经有数据（说明是升级上来的），就地认领
+    if (fs.existsSync(path.join("C:\\Baoluo\\data", "settings.json"))) return "C:\\Baoluo\\data";
   } catch {}
   return path.join(appData, "Baoluo");
 }

@@ -16,9 +16,6 @@ import type {
   TemplateConfig,
   VideoMeta,
   VideoMode,
-  VoiceConvertProgress,
-  VoiceConvertRequest,
-  VoiceConvertResult,
 } from "../shared/dialogue-types";
 import type {
   HotItem,
@@ -34,6 +31,14 @@ import type {
   AgentTask,
 } from "../shared/agent-types";
 import type {
+  RuntimeChatMessage,
+  RuntimeChatReply,
+  RuntimeModelList,
+  RuntimePermissionId,
+  RuntimeState,
+} from "../shared/runtime-types";
+import type { LlmRoute } from "../shared/llm-types";
+import type {
   SniffProgress,
   SniffRecord,
   SniffRunRequest,
@@ -44,6 +49,12 @@ import type {
 } from "../shared/doubao-batch-types";
 import type { GenerateShotOutcome } from "../shared/doubao-shot-types";
 import type { ImageProviderInfo } from "../shared/image-providers";
+import type { Conversation, ConversationSummary } from "../shared/conversation-types";
+import type {
+  TextCardProgress,
+  TextCardRequest,
+  TextCardResult,
+} from "../shared/textcard-types";
 import type {
   WorkRecord,
   WorkRecordKind,
@@ -54,8 +65,6 @@ import type {
 export type {
   VideoMeta,
   MediaPlatform,
-  VoiceConvertProgress,
-  VoiceConvertResult,
 } from "../shared/dialogue-types";
 export type { BatchItem, BatchState, BatchStartResult } from "../shared/doubao-batch-types";
 export type { GenerateShotOutcome } from "../shared/doubao-shot-types";
@@ -305,13 +314,6 @@ export interface DoubaoState {
   message: string;
 }
 
-export interface DoubaoBounds {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
 /** 豆包账号状态（工作台右下角登录入口用），定义与主进程 getDoubaoAccountState 一致 */
 export interface DoubaoAccountState {
   /** idle = 还没打开过页面（不联网、不猜登录态） */
@@ -331,10 +333,9 @@ export interface DoubaoOpenLoginResult {
 }
 
 const doubaoApi = {
+  /** 打开 / 关闭独立豆包窗口（豆包不再是内嵌面板，窗口由主进程管理） */
   setVisible: (visible: boolean): Promise<DoubaoState> =>
     ipcRenderer.invoke("doubao:setVisible", visible),
-  setBounds: (bounds: DoubaoBounds): Promise<void> =>
-    ipcRenderer.invoke("doubao:setBounds", bounds),
   state: (): Promise<DoubaoState> => ipcRenderer.invoke("doubao:state"),
   /** 账号状态：工作台右下角登录入口显示「未登录 / 已登录 / 加载中 / 打开失败」 */
   accountState: (): Promise<DoubaoAccountState> => ipcRenderer.invoke("doubao:accountState"),
@@ -361,10 +362,10 @@ const doubaoApi = {
     return () => ipcRenderer.removeListener("doubao:state", listener);
   },
   /**
-   * 用户在面板里把豆包登上了（扫码成功）。
+   * 用户在豆包窗口里把豆包登上了（扫码成功）。
    *
-   * 主进程的登录看门狗只在「打开面板时还没登录、之后登上了」这一刻发一次，
-   * 界面据此把面板收掉、回到用户原来那页——不用再手动点「关闭」。
+   * 主进程的登录看门狗只在「打开窗口时还没登录、之后登上了」这一刻发一次，
+   * 界面据此收起「豆包窗口开着」的状态——主进程同时会把窗口自动藏起来。
    */
   onLoggedIn: (cb: () => void): (() => void) => {
     const listener = () => cb();
@@ -372,7 +373,7 @@ const doubaoApi = {
     return () => ipcRenderer.removeListener("doubao:loggedIn", listener);
   },
   /**
-   * 自动把豆包的登录框叫出来（面板一打开就调）。
+   * 自动把豆包的登录框叫出来（豆包窗口一打开就调）。
    *
    * 未登录时点掉豆包的「登录」入口、弹出扫码框；已登录是空操作（alreadyLoggedIn=true）。
    * dialogOpened=false 且 message 非空时，界面照实提示用户手动点登录。
@@ -499,30 +500,6 @@ const localTtsApi = {
   },
 };
 
-/**
- * 变声器（方案 A：识别原音频文案 → 用指定音色重新配音）。
- * 与「语音合成」的区别：输入是音频/视频而不是文字。
- */
-const voiceConvertApi = {
-  chooseFile: (): Promise<string | null> =>
-    ipcRenderer.invoke("voice-convert:chooseFile"),
-  run: (req: VoiceConvertRequest): Promise<VoiceConvertResult> =>
-    ipcRenderer.invoke("voice-convert:run", req),
-  cancel: (requestId: string): Promise<void> =>
-    ipcRenderer.invoke("voice-convert:cancel", requestId),
-  /** 保存结果：选 mp3 会转码，选 wav 直接复制 */
-  saveAudio: (srcPath: string): Promise<string | null> =>
-    ipcRenderer.invoke("voice-convert:saveAudio", srcPath),
-  /** 在资源管理器里定位结果文件 */
-  showInFolder: (filePath: string): Promise<{ ok: boolean; error?: string }> =>
-    ipcRenderer.invoke("dialogue:showInFolder", filePath),
-  onProgress: (cb: (p: VoiceConvertProgress) => void) => {
-    const listener = (_e: unknown, p: VoiceConvertProgress) => cb(p);
-    ipcRenderer.on("voice-convert:progress", listener);
-    return () => ipcRenderer.removeListener("voice-convert:progress", listener);
-  },
-};
-
 /** v0.6.0 爆款嗅探：链接 → 转写 → AI 拆解（一次性，服务端不保存任何记录） */
 const sniffApi = {
   run: (req: SniffRunRequest): Promise<SniffRecord> =>
@@ -548,10 +525,14 @@ const agentApi = {
   }): Promise<AgentTask> => ipcRenderer.invoke("agent:updateParams", req),
   run: (req: { taskId: string; stepId?: string }): Promise<AgentTask> =>
     ipcRenderer.invoke("agent:run", req),
-  /** 记中间状态（分镜工作台把方案 id 写回任务，下次打开续上） */
+  /** 记中间状态（分镜工作台把方案 id 写回任务，下次打开续上；工作区卡跑完落状态） */
   patchState: (req: {
     taskId: string;
-    patch: { storyboardId?: string; hotRanAt?: number };
+    patch: {
+      storyboardId?: string;
+      hotRanAt?: number;
+      status?: AgentTask["status"];
+    };
   }): Promise<AgentTask> => ipcRenderer.invoke("agent:patchState", req),
   cancel: (taskId: string): Promise<boolean> => ipcRenderer.invoke("agent:cancel", taskId),
   chooseFile: (req: { kind: "image" | "media"; currentPath?: string }): Promise<string | null> =>
@@ -561,6 +542,70 @@ const agentApi = {
     const listener = (_e: unknown, p: AgentProgress) => cb(p);
     ipcRenderer.on("agent:progress", listener);
     return () => ipcRenderer.removeListener("agent:progress", listener);
+  },
+};
+
+/**
+ * 会话（左栏那一列）：一条会话装一次对话的全过程 ——
+ * 用户说的话、助手的回复、以及每一轮产出的任务卡。
+ */
+const conversationApi = {
+  list: (): Promise<ConversationSummary[]> => ipcRenderer.invoke("conv:list"),
+  get: (id: string): Promise<Conversation | null> => ipcRenderer.invoke("conv:get", id),
+  create: (seed?: string): Promise<Conversation> => ipcRenderer.invoke("conv:create", seed),
+  ofTask: (taskId: string): Promise<Conversation | null> => ipcRenderer.invoke("conv:ofTask", taskId),
+  append: (req: {
+    convId: string;
+    message: { role: "user" | "assistant"; text: string; images?: string[]; taskId?: string };
+  }): Promise<Conversation | null> => ipcRenderer.invoke("conv:append", req),
+  bindTask: (req: { convId: string; taskId: string }): Promise<Conversation | null> =>
+    ipcRenderer.invoke("conv:bindTask", req),
+  rename: (req: { convId: string; title: string }): Promise<Conversation | null> =>
+    ipcRenderer.invoke("conv:rename", req),
+  remove: (id: string): Promise<void> => ipcRenderer.invoke("conv:remove", id),
+};
+
+/**
+ * 集成运行时（设置 → 运行时）。对话区只读 activeId，不做切换 ——
+ * 换运行时要回设置页，这里不提供口子。
+ */
+const runtimeApi = {
+  state: (): Promise<RuntimeState> => ipcRenderer.invoke("runtime:state"),
+  detect: (): Promise<RuntimeState> => ipcRenderer.invoke("runtime:detect"),
+  apply: (id: string | null): Promise<RuntimeState> => ipcRenderer.invoke("runtime:apply", id),
+  /** 对话区底部的模型 / 权限范围：只改当前已应用那个运行时的偏好 */
+  setPrefs: (patch: {
+    model?: string | null;
+    permission?: RuntimePermissionId;
+  }): Promise<RuntimeState> => ipcRenderer.invoke("runtime:prefs", patch),
+  /** 模型清单：现读 CLI 自己的配置；force=true 跳过 30 秒缓存（菜单里点「重读」） */
+  models: (id?: string, force?: boolean): Promise<RuntimeModelList> =>
+    ipcRenderer.invoke("runtime:models", id, force),
+  openSkillsDir: (): Promise<void> => ipcRenderer.invoke("runtime:openSkillsDir"),
+  chat: (messages: RuntimeChatMessage[]): Promise<RuntimeChatReply> =>
+    ipcRenderer.invoke("runtime:chat", { messages }),
+};
+
+/** 文案/分镜由谁写：运行时优先，没接运行时才回落到 AI 服务 */
+const llmApi = {
+  route: (): Promise<LlmRoute> => ipcRenderer.invoke("llm:route"),
+};
+
+/**
+ * 文字卡视频：文案排版成图 → ffmpeg 合成（纯本地，不调模型）。
+ * 进度按「出图 / 合成」两段广播，界面据此画进度条。
+ */
+const textCardApi = {
+  render: (req: TextCardRequest): Promise<TextCardResult> =>
+    ipcRenderer.invoke("textcard:render", req),
+  cancel: (requestId: string): Promise<boolean> =>
+    ipcRenderer.invoke("textcard:cancel", requestId),
+  openDir: (): Promise<{ ok: boolean; path: string; error?: string }> =>
+    ipcRenderer.invoke("textcard:openDir"),
+  onProgress: (cb: (p: TextCardProgress) => void): (() => void) => {
+    const listener = (_e: unknown, p: TextCardProgress) => cb(p);
+    ipcRenderer.on("textcard:progress", listener);
+    return () => ipcRenderer.removeListener("textcard:progress", listener);
   },
 };
 
@@ -580,9 +625,12 @@ contextBridge.exposeInMainWorld("dataDir", dataDirApi);
 contextBridge.exposeInMainWorld("voice", voiceApi);
 contextBridge.exposeInMainWorld("asr", asrApi);
 contextBridge.exposeInMainWorld("localTts", localTtsApi);
-contextBridge.exposeInMainWorld("voiceConvert", voiceConvertApi);
 contextBridge.exposeInMainWorld("sniff", sniffApi);
 contextBridge.exposeInMainWorld("agent", agentApi);
+contextBridge.exposeInMainWorld("conv", conversationApi);
+contextBridge.exposeInMainWorld("runtime", runtimeApi);
+contextBridge.exposeInMainWorld("llm", llmApi);
+contextBridge.exposeInMainWorld("textcard", textCardApi);
 
 export type BeeApi = typeof beeApi;
 export type MaterialsApi = typeof materialsApi;
@@ -601,6 +649,9 @@ export type DataDirApi = typeof dataDirApi;
 export type VoiceApi = typeof voiceApi;
 export type AsrApi = typeof asrApi;
 export type LocalTtsApi = typeof localTtsApi;
-export type VoiceConvertApi = typeof voiceConvertApi;
 export type SniffApi = typeof sniffApi;
 export type AgentApi = typeof agentApi;
+export type ConversationApi = typeof conversationApi;
+export type RuntimeApi = typeof runtimeApi;
+export type LlmApi = typeof llmApi;
+export type TextCardApi = typeof textCardApi;

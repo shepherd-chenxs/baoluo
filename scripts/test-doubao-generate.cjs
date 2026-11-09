@@ -202,8 +202,9 @@ process.env.BAOLUO_DOUBAO_URL = base + "/chat/create-image";
   check(loggedIn === true, "没有登录按钮时判为已登录", `loggedIn=${loggedIn}`);
 
   // ---- A2) 浮层可被关掉 ----
-  const view = win.contentView.children.find((v) => v.webContents);
-  const hadPromo = await view.webContents.executeJavaScript(`!!document.getElementById('promo')`, true);
+  // 豆包 v1.0.0 起是独立 BrowserWindow：主窗口之外的那个就是它
+  const panel = BrowserWindow.getAllWindows().find((w) => w !== win && !w.isDestroyed());
+  const hadPromo = await panel.webContents.executeJavaScript(`!!document.getElementById('promo')`, true);
   check(hadPromo === true, "替身页初始有遮挡浮层（模拟豆包推广弹窗）");
 
 

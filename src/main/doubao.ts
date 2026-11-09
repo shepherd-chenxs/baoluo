@@ -1,26 +1,27 @@
 /**
- * 内嵌豆包（v1.0.0）：在宝螺窗口里挂一个 WebContentsView，当作分镜页的生图抽屉。
+ * 豆包独立窗口（v1.0.0）：点「打开豆包生图」弹出一个**独立的浏览器窗口**（不再内嵌）。
  *
- * 为什么是 WebContentsView 而不是 <webview>：
- *   - <webview> 已被 Electron 官方标记为不稳定，且要在渲染层开 webviewTag；
- *   - WebContentsView 是主进程的正式 API，能精确控制位置与可见性。
+ * 为什么从内嵌 WebContentsView 换成独立 BrowserWindow：
+ *   - 用户诉求：登录/看生图不该挤在宝螺窗口里，像开了一个浏览器标签一样自然；
+ *   - BrowserWindow 有自己的标题栏和关闭按钮，用户操作零学习成本；
+ *   - 登录态仍然是固定分区 `persist:doubao`，落盘在 <数据目录>/Partitions/doubao，
+ *     跟着「设置 → 通用设置 → 数据目录」一起走，跨重启保留——和内嵌时代完全一致。
  *
- * 登录态：固定分区 `persist:doubao`，落盘在 <数据目录>/Partitions/doubao，
- * 所以跟着「设置 → 通用设置 → 数据目录」一起走，跨重启保留。
- *
- * 关掉抽屉 = 隐藏 + 冻结，**不销毁**。
+ * 「关掉 = 隐藏 + 冻结，不销毁」的策略保留：用户点窗口右上角 ✕ 或宝螺里的「关闭」，
+ * 只是把窗口藏起来（`hide()`），页面活着，重开秒回；窗口自己的 close 事件被拦下
+ * 转成 hide，应用退出/迁移数据目录时才真正 destroy。
  *
  * 为什么不销毁：豆包页面本身很重（实测 360 个请求、约 4MB，dom-ready 2.1s、
  * 输入框可打字 3~5s）。销毁重建意味着每次重开都重付这笔钱——
  * 实测「销毁重建重开可用 3180ms」vs「只隐藏重开可用 41ms」，差 77 倍。
  *
- * 隐藏了还联不联网：实测真实豆包页在静止后被隐藏，90 秒内请求数为 0
- * （A/B/C 三种设置都是 0）。但页面刚加载完那几秒隐藏仍会有在途请求，
- * 所以额外用 CDP Page.setWebLifecycleState("frozen") 冻一层，双保险。
+ * 隐藏了还联不联网：实测真实豆包页在静止后被隐藏，90 秒内请求数为 0。
+ * 但页面刚加载完那几秒隐藏仍会有在途请求，所以额外用 CDP
+ * Page.setWebLifecycleState("frozen") 冻一层，双保险。
  *
- * 视图只在「窗口关闭」和「数据目录迁移」时销毁。
+ * 后台生图仍然走屏幕外的离屏 worker 窗口（见下文），与独立窗口同一时刻只留一个。
  */
-import { BrowserWindow, WebContentsView, session } from "electron";
+import { BrowserWindow, session } from "electron";
 import { sniffRasterImageExt } from "../shared/image-magic";
 
 /** 图像生成页直达地址，已验证可用；比首页少一步点击 */
@@ -127,31 +128,29 @@ export interface DoubaoState {
   message: string;
 }
 
-let view: WebContentsView | null = null;
-let ownerWin: BrowserWindow | null = null;
-/** 抽屉是否开着（用户意图） */
-let open = false;
-/** 视图此刻是否真的显示着（抽屉开着但还在加载时不显示） */
-let shown = false;
 /**
- * 用户是不是真的想「看到」抽屉。
+ * 豆包独立窗口（正常浏览器窗口：有标题栏、在任务栏里）。
  *
- * 与 `open` 分开，是为了支持**后台生图**：生图要在页面里跑，页面必须活着（open=true），
- * 但不该弹到用户脸上（wantShown=false）——用户要的是「像调 API 一样无感」。
- * 页面隐藏时靠 `backgroundThrottling: false` 保活，定时器和请求照常跑。
+ * 登录、看生成过程都在这里；「关掉只隐藏不销毁」——重开秒回。
  */
-let wantShown = false;
+let panelWin: BrowserWindow | null = null;
+/** 宝螺主窗口：状态广播（doubao:state / doubao:loggedIn）发给它的渲染层 */
+let mainWin: BrowserWindow | null = null;
+/** 用户意图：豆包窗口开着（窗口可能还在加载中） */
+let open = false;
+/** 首屏是否已经加载完成过 */
+let loaded = false;
+
 /**
  * 后台生图用的「离屏 worker 窗口」（屏幕外的普通窗口，里面是同一个豆包页面）。
  *
- * 为什么不复用抽屉视图：把子视图藏起来（setVisible(false)）或挪到窗口外，
- * Chromium 都会把页面判成 hidden —— 实测 `document.hidden === true`、
- * `innerWidth/Height = 0`、`execCommand('insertText')` 失效、发送按钮不渲染，
- * 提示词根本填不进去（后台生图曾经就是这么坏掉的）。
+ * 为什么不直接驱动豆包窗口：用户把窗口关掉（= 隐藏）后，页面会被判成 hidden ——
+ * 实测 `document.hidden === true`、`innerWidth/Height = 0`、
+ * `execCommand('insertText')` 失效、发送按钮不渲染，提示词根本填不进去。
  * 而一个「移到屏幕外、show: true」的普通窗口，配合 chromium-switches.ts 里那几个
  * 开关，页面看自己是可见的（实测 visibility=visible、hasFocus=true、填词成功）。
  *
- * 同一时刻只留一个页面：开面板就销毁 worker，后台生图就销毁抽屉视图（省内存）。
+ * 同一时刻只留一个页面：开豆包窗口就销毁 worker，后台生图就销毁豆包窗口（省内存）。
  */
 let workerWin: BrowserWindow | null = null;
 let workerStatus: DoubaoStatus = "idle";
@@ -159,8 +158,6 @@ let workerMessage = "";
 let workerLoaded = false;
 /** 屏幕外的坐标：虚拟桌面允许负坐标，用户不可能看到 */
 const WORKER_X = -3200;
-/** 首屏是否已经加载完成过 */
-let loaded = false;
 /** 页面是否已被 CDP 冻结 */
 let frozen = false;
 let status: DoubaoStatus = "idle";
@@ -177,16 +174,16 @@ export function beginGeneration(): void {
 export function endGeneration(): void {
   busyCount = Math.max(0, busyCount - 1);
   /*
-   * 后台生图跑完、抽屉又没开着时，把页面冻回去省 CPU（下次生图前 prepareDoubaoHidden 会解冻）。
+   * 后台生图跑完、豆包窗口又没开着时，把页面冻回去省 CPU（下次生图前 prepareDoubaoHidden 会解冻）。
    * 页面的网络轮询 / 定时器在冻结时停止，所以这一步必须放在 busy 归零之后。
    */
-  if (busyCount === 0 && open && !wantShown && !frozen) setFrozen(true);
+  if (busyCount === 0 && open && !isPanelVisible() && !frozen) setFrozen(true);
 }
 
 /**
  * 给测试看的内部状态（不参与业务逻辑）。
  *
- * 批量生图要求「关抽屉不中断任务」，靠的就是 busyCount 拦住 setFrozen；
+ * 批量生图要求「关豆包窗口不中断任务」，靠的就是 busyCount 拦住 setFrozen；
  * 这两个值不导出的话，那条不变量只能在测试里靠时序猜。
  */
 export function getGenerationGuardState(): { busy: number; frozen: boolean } {
@@ -194,18 +191,17 @@ export function getGenerationGuardState(): { busy: number; frozen: boolean } {
 }
 
 function currentState(): DoubaoState {
-  const alive = hasView();
-  if (alive) {
+  if (hasPanel()) {
     return {
       attached: true,
-      visible: shown,
+      visible: isPanelVisible(),
       status,
-      url: view!.webContents.getURL(),
+      url: panelWin!.webContents.getURL(),
       message: lastMessage,
     };
   }
   /*
-   * 没有面板视图时报 worker 的状态：后台生图（面板关着）时，
+   * 没有豆包窗口时报 worker 的状态：后台生图（窗口关着）时，
    * ensureDoubaoReady 与登录入口都靠这个状态判断"页面准备好没有"。
    * visible 一律 false —— 它在屏幕外，对用户来说就是没显示。
    */
@@ -223,8 +219,8 @@ function currentState(): DoubaoState {
 
 /** 有窗口订阅了状态变化就广播（渲染层用来显示「加载中 / 加载失败」） */
 function emit(): void {
-  if (ownerWin && !ownerWin.isDestroyed()) {
-    ownerWin.webContents.send("doubao:state", currentState());
+  if (mainWin && !mainWin.isDestroyed()) {
+    mainWin.webContents.send("doubao:state", currentState());
   }
 }
 
@@ -235,7 +231,7 @@ function setStatus(next: DoubaoStatus, message = ""): void {
 }
 
 /**
- * 冻结 / 解冻页面（对「当前页面」生效：用户看得见时是面板视图，否则是离屏 worker）。
+ * 冻结 / 解冻页面（对「当前页面」生效：用户看得见时是豆包窗口，否则是离屏 worker）。
  *
  * 冻结的意义：面板关着的时候页面还能跑（后台生图），但闲置时不该一直轮询烧 CPU /
  * 流量，所以任务停下来就冻住它，下次干活前再解冻。
@@ -251,7 +247,7 @@ function setFrozen(next: boolean): void {
   if (frozen === next) return;
   /*
    * 有生成任务在跑时，页面必须保持 active：
-   * 批量生图要求「关抽屉不中断任务」，而关抽屉会走到这里想冻结页面，
+   * 批量生图要求「关豆包窗口不中断任务」，而关窗口会走到这里想冻结页面，
    * 一冻下去豆包的生成轮询就停了，任务会一直卡到超时。
    */
   if (next && busyCount > 0) return;
@@ -301,31 +297,34 @@ function handleNewWindow(target: Electron.WebContents): void {
   });
 }
 
-function destroyView(): void {
+/** 豆包窗口还活着吗（不看可见性） */
+function hasPanel(): boolean {
+  return !!panelWin && !panelWin.isDestroyed() && !panelWin.webContents.isDestroyed();
+}
+
+/** 豆包窗口此刻是否真的显示着 */
+function isPanelVisible(): boolean {
+  return hasPanel() && panelWin!.isVisible();
+}
+
+function destroyPanel(): void {
   stopLoginWatch();
-  const v = view;
-  const win = ownerWin;
-  view = null;
-  ownerWin = null;
+  const w = panelWin;
+  panelWin = null;
   open = false;
-  wantShown = false;
-  shown = false;
   loaded = false;
   frozen = false;
   status = "idle";
   lastMessage = "";
-  if (!v) return;
+  if (!w) return;
   // 关掉前把 cookie / localStorage 落盘，否则刚登录的会话可能还在内存里
   flushDoubaoStorage();
   try {
-    win?.contentView.removeChildView(v);
+    // close 事件被我们拦成 hide 了，销毁前先摘掉，destroy 才不会被拦
+    w.removeAllListeners("close");
+    w.destroy();
   } catch {
     /* 窗口可能已经没了 */
-  }
-  try {
-    if (!v.webContents.isDestroyed()) v.webContents.close();
-  } catch {
-    /* noop */
   }
 }
 
@@ -371,96 +370,104 @@ function applyUaSpoof(wc: Electron.WebContents): void {
  * 为什么不能立刻 loadURL：UA-CH 覆盖是异步落地的（`Emulation.setUserAgentOverride`
  * 在 Electron 30 里的回复不会回来，只能靠等），首个文档请求发早了就还是旧指纹。
  */
-function scheduleLoad(v: WebContentsView, onFail: () => void): void {
+function scheduleLoad(wc: Electron.WebContents, onFail: () => void): void {
   setTimeout(() => {
-    if (v.webContents.isDestroyed()) return;
-    v.webContents.loadURL(targetUrl()).catch((e) => {
+    if (wc.isDestroyed()) return;
+    wc.loadURL(targetUrl()).catch((e) => {
       console.error("[doubao] 页面加载失败：", e?.message ?? e);
       onFail();
     });
   }, humanDelayMs(250, 450));
 }
 
-/** 懒创建：第一次打开抽屉时才建视图、才发起网络请求 */
-function ensureView(win: BrowserWindow): WebContentsView {
-  if (view && !view.webContents.isDestroyed() && ownerWin === win) return view;
-  if (view) destroyView();
+/**
+ * 懒创建：第一次打开时才建豆包窗口、才发起网络请求。
+ *
+ * 窗口先以 `show: false` 创建，加载由 setDoubaoVisible(true) 在亮出窗口之后触发——
+ * 顺序不能反：先加载再显示，用户会先看到一瞬间的白页。
+ */
+function ensurePanel(): BrowserWindow {
+  if (hasPanel()) return panelWin!;
+  if (panelWin) destroyPanel();
 
   const ses = session.fromPartition(PARTITION);
-  const v = new WebContentsView({
+  const w = new BrowserWindow({
+    width: 1280,
+    height: 860,
+    show: false,
+    title: "豆包",
+    backgroundColor: "#ffffff",
     webPreferences: {
       session: ses,
       contextIsolation: true,
       nodeIntegration: false,
-      // 抽屉可能长时间开着，别让后台标签页节流把豆包的生成轮询掐掉
+      // 窗口可能被用户缩到后台，别让节流把豆包的生成轮询掐掉
       backgroundThrottling: false,
     },
   });
-  v.setBackgroundColor("#ffffff");
-  applyUaSpoof(v.webContents);
-  blockNonHttp(v.webContents);
-  handleNewWindow(v.webContents);
+  panelWin = w;
+  loaded = false;
+  frozen = false;
+  status = "idle";
+  lastMessage = "";
 
-  v.webContents.on("did-start-loading", () => {
-    /*
-     * 只对首屏做「先藏起来、别把白页怼到用户脸上」。
-     * 豆包是 SPA，站内跳转会再次触发 did-start-loading，若每次都藏，
-     * 而站内跳转又不会再触发 did-finish-load，视图就会一直藏着不回来。
-     */
-    if (loaded) return;
-    shown = false;
-    v.setVisible(false);
+  // 页面标题不参与窗口标题，避免窗口标题栏出现第二个标题来源
+  w.on("page-title-updated", (e) => e.preventDefault());
+  const wc = w.webContents;
+  applyUaSpoof(wc);
+  blockNonHttp(wc);
+  handleNewWindow(wc);
+
+  wc.on("did-start-loading", () => {
+    if (loaded) return; // SPA 站内跳转也会触发，别重复报「加载中」
     setStatus("loading", "正在打开豆包…");
   });
-  v.webContents.on("did-finish-load", () => {
+  wc.on("did-finish-load", () => {
     loaded = true;
-    // 抽屉已经关了（用户手快）、或这是后台生图 → 都别显示
-    if (open && wantShown) {
-      shown = true;
-      v.setVisible(true);
-    }
     setStatus("ready", "");
   });
   /** SPA 站内跳转不会触发 did-finish-load，但同样说明页面已经能用了 */
-  v.webContents.on("did-navigate-in-page", (_e, _url, isMainFrame) => {
+  wc.on("did-navigate-in-page", (_e, _url, isMainFrame) => {
     if (!isMainFrame) return;
     loaded = true;
-    if (open && wantShown && !shown) {
-      shown = true;
-      v.setVisible(true);
-    }
     setStatus("ready", "");
   });
-  v.webContents.on("did-fail-load", (_e, code, desc, _url, isMainFrame) => {
+  wc.on("did-fail-load", (_e, code, desc, _url, isMainFrame) => {
     if (!isMainFrame) return;
     // -3 是用户主动中断导航，不算失败
     if (code === -3) return;
-    shown = false;
-    v.setVisible(false);
     setStatus("error", loadFailText(code, desc));
   });
-  v.webContents.on("render-process-gone", () => {
-    shown = false;
-    v.setVisible(false);
-    setStatus("error", "豆包页面已崩溃，请关闭抽屉后重试。");
+  wc.on("render-process-gone", () => {
+    setStatus("error", "豆包页面已崩溃，请关闭豆包窗口后重试。");
   });
 
-  win.contentView.addChildView(v);
-  view = v;
-  ownerWin = win;
-  shown = false;
-  frozen = false;
-  v.setVisible(false);
-  return v;
+  /*
+   * 用户点窗口自己的 ✕：隐藏而不是销毁（重开秒回，登录态照旧）。
+   * 应用退出 / 数据目录迁移走 destroyPanel()，用的是 destroy()，不经过 close 事件。
+   */
+  w.on("close", (e) => {
+    if (panelWin !== w || w.isDestroyed()) return;
+    e.preventDefault();
+    stopLoginWatch();
+    open = false;
+    setFrozen(true);
+    w.hide();
+    emit();
+  });
+
+  emit();
+  return w;
 }
 
-/** 窗口关闭时调用，避免留下孤儿视图 */
-export function disposeDoubao(win: BrowserWindow): void {
-  if (ownerWin === win) destroyView();
+/** 宝螺主窗口关闭时调用，避免留下孤儿窗口 */
+export function disposeDoubao(_win: BrowserWindow): void {
   /*
-   * 离屏 worker 窗口也是 BrowserWindow：不销毁它，主窗口关了之后
-   * `window-all-closed` 不会触发，进程会留在后台不退（实测坑：应用"关不掉"）。
+   * 豆包窗口与离屏 worker 窗口都是 BrowserWindow：不销毁它们的话，
+   * 主窗口关了之后 `window-all-closed` 不会触发，进程会留在后台不退
+   * （实测坑：应用"关不掉"）。
    */
+  destroyPanel();
   destroyWorker();
 }
 
@@ -470,13 +477,13 @@ export function disposeDoubao(win: BrowserWindow): void {
 
 /** 把页面放到屏幕外的窗口里加载（用户看不到，但页面认为自己是可见的） */
 function scheduleWorkerLoad(w: BrowserWindow): void {
-  // 和抽屉一样，等 UA-CH 覆盖落地再发首个请求
+  // 和豆包窗口一样，等 UA-CH 覆盖落地再发首个请求
   setTimeout(() => {
     if (w.isDestroyed() || w.webContents.isDestroyed()) return;
     w.webContents.loadURL(targetUrl()).catch((e) => {
       console.error("[doubao] 后台页面加载失败：", e?.message ?? e);
       workerStatus = "error";
-      workerMessage = "豆包页面没能打开（网络不通，或豆包已改版）。点面板右上角「重载」再试一次。";
+      workerMessage = "豆包页面没能打开（网络不通，或豆包已改版）。点宝螺里的「重载」再试一次。";
       emit();
     });
   }, humanDelayMs(250, 450));
@@ -584,20 +591,20 @@ function destroyWorker(): void {
 /**
  * 现在该驱动哪个页面。
  *
- *   1) 面板正显示给用户看 → 驱动面板视图（用户能看着它干活，符合预期）；
+ *   1) 豆包窗口正显示给用户看 → 驱动豆包窗口（用户能看着它干活，符合预期）；
  *   2) 否则 → 驱动离屏 worker（后台生图，用户无感）；
  *   3) 都没有 → null。
  *
- * 注意「面板建好了但没显示」那一档：DOM 还能读（登录态判断够用），
- * 但填词/点击不可靠（隐藏视图视口为 0）——要干活时请先走 prepareDoubaoHidden()，
- * 它会把面板视图换掉、改用 worker。
+ * 注意「窗口建好了但被用户藏起来」那一档：DOM 还能读（登录态判断够用），
+ * 但填词/点击不可靠（隐藏页面视口为 0）——要干活时请先走 prepareDoubaoHidden()，
+ * 它会把豆包窗口换掉、改用 worker。
  */
 function activePage(): Electron.WebContents | null {
-  if (view && !view.webContents.isDestroyed() && shown && wantShown) return view.webContents;
+  if (isPanelVisible()) return panelWin!.webContents;
   if (workerWin && !workerWin.isDestroyed() && !workerWin.webContents.isDestroyed()) {
     return workerWin.webContents;
   }
-  if (view && !view.webContents.isDestroyed()) return view.webContents;
+  if (hasPanel()) return panelWin!.webContents;
   return null;
 }
 
@@ -610,13 +617,11 @@ function requirePage(): Electron.WebContents {
   return p;
 }
 
-/** 面板视图还在没有（不看可见性） */
-function hasView(): boolean {
-  return !!view && !view.webContents.isDestroyed();
-}
-
-/** 打开抽屉：创建视图、加载页面、亮出来 */
+/** 打开 / 关闭独立豆包窗口 */
 export function setDoubaoVisible(win: BrowserWindow, next: boolean): DoubaoState {
+  // 主窗口记下来：状态广播 / 登录完成通知都发给它
+  if (!mainWin || mainWin.isDestroyed()) mainWin = win;
+
   if (!next) {
     /*
      * 关掉只隐藏、不销毁：重开才能秒回（实测 41ms vs 重建 3180ms）。
@@ -624,11 +629,9 @@ export function setDoubaoVisible(win: BrowserWindow, next: boolean): DoubaoState
      */
     stopLoginWatch();
     open = false;
-    wantShown = false;
-    if (view && !view.webContents.isDestroyed()) {
+    if (hasPanel()) {
       setFrozen(true);
-      shown = false;
-      view.setVisible(false);
+      panelWin!.hide();
     }
     emit();
     return currentState();
@@ -636,22 +639,18 @@ export function setDoubaoVisible(win: BrowserWindow, next: boolean): DoubaoState
 
   // 用户要看豆包：把后台 worker 让出来（同一时刻只留一个页面，省内存）
   destroyWorker();
-  const v = ensureView(win);
+  const w = ensurePanel();
   open = true;
-  wantShown = true;
   setFrozen(false);
-  if (!v.webContents.getURL()) {
+  // 先亮窗口、再发首个请求：反过来用户会先看到一瞬间的白页
+  w.show();
+  if (!w.webContents.getURL()) {
     setStatus("loading", "正在打开豆包…");
-    scheduleLoad(v, () => {
-      shown = false;
-      v.setVisible(false);
-      setStatus("error", "豆包页面没能打开（网络不通，或豆包已改版）。点「重载」再试一次。");
+    scheduleLoad(w.webContents, () => {
+      setStatus("error", "豆包页面没能打开（网络不通，或豆包已改版）。点宝螺里的「重载」再试一次。");
     });
-  } else {
-    shown = true;
-    v.setVisible(true);
   }
-  // 用户打开面板＝想登录 / 想看生成；没登录的话，登录完自动把他送回宝螺
+  // 用户打开窗口＝想登录 / 想看生成；没登录的话，登录完自动把窗口收掉
   startLoginWatch();
   emit();
   return currentState();
@@ -662,28 +661,24 @@ export function setDoubaoVisible(win: BrowserWindow, next: boolean): DoubaoState
  *
  * 生图走这条路（用户诉求：像调 API 一样无感，不要弹豆包窗口）。
  *
- * 实现方式是**换一个页面载体**：先销毁面板视图（如果还留着），再把页面放进
+ * 实现方式是**换一个页面载体**：先销毁豆包窗口（如果还留着），再把页面放进
  * 屏幕外的 worker 窗口（见 ensureWorker 的注释：屏幕外的普通窗口 + 关掉窗口遮挡判定，
  * 页面看自己仍是可见的，所以填词/点击/轮询都正常）。
  *
- * 踩过的两条死路，都写在这里免得以后又走回去：
- *   1) 视图 `setVisible(false)`：页面被判 hidden、视口 0×0 → 提示词填不进去；
- *   2) 视图挪到窗口外（还 setVisible(true)）：父窗口会把这块裁掉，
- *      视口照样是 0×0、`document.hidden === true`（实测 tmp/probe-bg-real.log）。
+ * 踩过的死路（写在这里免得以后又走回去）：页面被判 hidden（隐藏窗口/隐藏视图）
+ * 时视口 0×0、`document.hidden === true`，提示词填不进去、发送按钮不渲染。
  *
- * 用户自己点「打开豆包生图」时走 setDoubaoVisible(true)：那时 wantShown 才置真。
+ * 用户自己点「打开豆包生图」时走 setDoubaoVisible(true)：那时才亮出独立窗口。
  */
 export function prepareDoubaoHidden(_win?: BrowserWindow): DoubaoState {
   // 后台生图：用户没在看，登录完成也没人等着被送回宝螺
   stopLoginWatch();
   /*
    * 同一时刻只留一个页面（省内存）：
-   * 面板视图就算建过、现在关着，它也已经是 hidden 状态、干不了活，直接换掉。
+   * 豆包窗口就算建过、现在关着，它也已经是 hidden 状态、干不了活，直接换掉。
    */
-  if (hasView()) destroyView();
+  if (hasPanel()) destroyPanel();
   open = true;
-  wantShown = false;
-  shown = false;
   ensureWorker();
   setFrozen(false);
   emit();
@@ -691,39 +686,13 @@ export function prepareDoubaoHidden(_win?: BrowserWindow): DoubaoState {
 }
 
 /**
- * 抽屉在窗口里的位置（渲染层量好 DOM 后送过来）。
- * 宽高为 0 时视为不可见——比如页面被 KeepAlive 切走了。
+ * 兼容入口（旧内嵌抽屉时代，渲染层量好 DOM 坐标后送过来摆视图）。
+ *
+ * 豆包换成独立窗口后，窗口的位置/大小由用户自己拖，这里不再消费坐标；
+ * 保留函数是为了让旧脚本（scripts/test-doubao-*.cjs）不至于直接崩。
  */
-export function setDoubaoBounds(bounds: DoubaoBounds): void {
-  if (!view || view.webContents.isDestroyed()) return;
-  const w = Math.max(0, Math.round(bounds.width));
-  const h = Math.max(0, Math.round(bounds.height));
-  if (w < 2 || h < 2) {
-    /*
-     * 占位盒没了（关掉抽屉、或页面被切走）。这里只收起视图、不改 open：
-     * 用户意图还是「开着」，切回来要能自动恢复显示。
-     */
-    if (shown) {
-      shown = false;
-      setFrozen(true);
-      view.setVisible(false);
-      emit();
-    }
-    return;
-  }
-  view.setBounds({
-    x: Math.round(bounds.x),
-    y: Math.round(bounds.y),
-    width: w,
-    height: h,
-  });
-  // 位置有效 + 抽屉开着 + 用户要看 + 页面加载好了 → 亮出来
-  if (open && wantShown && !shown && status === "ready") {
-    setFrozen(false);
-    shown = true;
-    view.setVisible(true);
-    emit();
-  }
+export function setDoubaoBounds(_bounds: DoubaoBounds): void {
+  /* no-op：独立窗口自己管自己的位置 */
 }
 
 export function getDoubaoState(): DoubaoState {
@@ -745,7 +714,7 @@ export interface DoubaoAccountState {
  *
  * 刻意**不**为了这次查询去创建页面：没打开过就返回 `idle + loggedIn: null`，
  * 免得用户只是停在「工作台」就白白加载一次豆包（几 MB 请求）。
- * 页面已经在（抽屉开着 / 之前开过）时才真查——查登录态只需要读 DOM，
+ * 页面已经在（豆包窗口开着 / 之前开过）时才真查——查登录态只需要读 DOM，
  * 页面即使被藏在后台（视口为 0）也能读（实测）。
  */
 export async function getDoubaoAccountState(): Promise<DoubaoAccountState> {
@@ -762,7 +731,7 @@ export async function getDoubaoAccountState(): Promise<DoubaoAccountState> {
 }
 
 // ---------------------------------------------------------------------------
-// 登录完成看门狗：用户扫码登录成功后，自动把面板收掉、回到宝螺原来的页面。
+// 登录完成看门狗：用户扫码登录成功后，自动把豆包窗口收掉、回到宝螺。
 //
 // 用户点登录入口的意图是「登录」，不是「一直待在豆包页面里」。登录完了还要
 // 自己找关闭按钮，这一步是多余的。
@@ -807,28 +776,36 @@ function stopLoginWatch(): void {
   loginSeenLoggedOut = false;
 }
 
-/** 登录完成 → 通知渲染层把面板收掉（回到用户原来那页） */
+/**
+ * 登录完成：通知宝螺渲染层（刷新登录点、收起面板状态），并把豆包窗口自动藏起来。
+ */
 function emitLoggedIn(): void {
-  if (ownerWin && !ownerWin.isDestroyed()) ownerWin.webContents.send("doubao:loggedIn");
+  if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send("doubao:loggedIn");
+  if (hasPanel()) {
+    open = false;
+    setFrozen(true);
+    panelWin!.hide();
+    emit();
+  }
 }
 
 /**
  * 盯着「用户把豆包登上了」，登上了就广播 `doubao:loggedIn`。
  *
  * 防误关的三条规矩（少一条都会让「只是进来看看」的用户被弹出去）：
- *   1) 只在面板**对用户可见**时盯——后台生图（wantShown=false）不盯；
+ *   1) 只在豆包窗口**对用户可见**时盯——后台生图不盯；
  *   2) 必须先见过一次**明确的「未登录」**才进入待命；
  *   3) 待命之后登录按钮消失（豆包改成渲染输入框）＝ 登录完成，广播一次就收工。
  */
 function startLoginWatch(): void {
   if (loginTimer) return; // 已经在盯了
-  if (!open || !wantShown) return; // 后台生图不盯
+  if (!open || !isPanelVisible()) return; // 后台生图不盯
   loginSeenLoggedOut = false;
   const token = ++loginWatchToken;
   const startedAt = Date.now();
-  /** 这一代还作数吗：面板还开着、还看得见、视图还活着 */
+  /** 这一代还作数吗：窗口还开着、还看得见、还活着 */
   const alive = () =>
-    token === loginWatchToken && open && wantShown && !!view && !view.webContents.isDestroyed();
+    token === loginWatchToken && open && isPanelVisible();
 
   const tick = async () => {
     if (token !== loginWatchToken) return; // 上一代的轮次，不碰全局状态
@@ -911,14 +888,6 @@ export function describeDoubaoFailure(e: unknown): { code: string; message: stri
   };
 }
 
-/** 页面得先建好、能跑 JS，否则什么都做不了 */
-function requireView(): WebContentsView {
-  if (!view || view.webContents.isDestroyed()) {
-    throw new DoubaoError("豆包页面还没打开，请先点「打开豆包生图」。", "not-open");
-  }
-  return view;
-}
-
 async function run<T>(script: string): Promise<T> {
   // 页面目标由 activePage() 决定：用户看得见面板就用面板，否则用离屏 worker
   const p = requirePage();
@@ -932,7 +901,7 @@ async function run<T>(script: string): Promise<T> {
      */
     console.error("[doubao] 页面脚本执行失败：", e?.message ?? e);
     throw new DoubaoError(
-      "没能读到豆包页面的内容（页面可能正在重载或已改版）。请点面板右上角「重载」后重试，或打开豆包窗口把画面提示词手动输进去生图。",
+      "没能读到豆包页面的内容（页面可能正在重载或已改版）。请点宝螺里的「重载」后重试，或打开豆包窗口把画面提示词手动输进去生图。",
       "script"
     );
   }
@@ -1006,7 +975,7 @@ export async function isDoubaoLoggedIn(timeoutMs = 30_000): Promise<boolean> {
     await new Promise((res) => setTimeout(res, 300));
   }
   throw new DoubaoError(
-    "豆包页面一直没有响应（可能网络不通，也可能豆包已改版）。请先点面板右上角「重载」重试；若仍不行，打开豆包窗口把画面提示词手动输进去生图。",
+    "豆包页面一直没有响应（可能网络不通，也可能豆包已改版）。请点宝螺里的「重载」重试；若仍不行，打开豆包窗口把画面提示词手动输进去生图。",
     "not-rendered"
   );
 }
@@ -1014,14 +983,14 @@ export async function isDoubaoLoggedIn(timeoutMs = 30_000): Promise<boolean> {
 /**
  * 让豆包页面进入「跑得动」的状态，生图前必须先过这一关。
  *
- * 默认（silent=false）判的是 visible，不是 attached：抽屉关掉时视图不销毁（为了秒开），
+ * 默认（silent=false）判的是 visible，不是 attached：豆包窗口关掉时页面不销毁（为了秒开），
  * 但会被隐藏 + CDP 冻结，页面停在后台、输入框拿不到焦点。早期判 attached，于是
- * 「开过抽屉又关掉 → 点一键生图」会往冻住的页面里填词，20 秒后报
+ * 「开过窗口又关掉 → 点一键生图」会往冻住的页面里填词，20 秒后报
  * 「没能把提示词填进豆包输入框」（实测踩过）。
  *
  * silent=true 是**后台生图**：页面要活着，但不许弹到用户脸上（用户要的是「像调 API 一样无感」）。
- * 这时不调 setDoubaoVisible，只 prepareDoubaoHidden（建视图 / 加载 / 解冻）；
- * 用户自己已经开着抽屉时不打扰他（保持显示）。
+ * 这时不调 setDoubaoVisible，只 prepareDoubaoHidden（建窗口 / 加载 / 解冻）；
+ * 用户自己已经开着豆包窗口时不打扰他（保持显示）。
  */
 export async function ensureDoubaoReady(
   win: BrowserWindow,
@@ -1047,7 +1016,7 @@ export async function ensureDoubaoReady(
 }
 
 /**
- * 未登录就别往下走（T-004 标准 2）：返回给界面的人话结果，界面据此把抽屉打开让用户扫码。
+ * 未登录就别往下走（T-004 标准 2）：返回给界面的人话结果，界面据此把豆包窗口打开让用户扫码。
  *
  * 与「页面没渲染出来」分开报：后者是改版/网络问题，提示用户去登录就指错方向了。
  */
@@ -1112,10 +1081,10 @@ async function probeLoginDialog(): Promise<{ markers: boolean; bigOverlays: numb
  * 自动把豆包的登录框叫出来。
  *
  * 用户点「登录豆包」的意图就是登录，不该还要他在这张陌生页面里自己找「登录」两个字。
- * 所以面板一打开就点掉登录入口，把扫码框弹出来（登录完成后由登录看门狗把面板收掉）。
+ * 所以豆包窗口一打开就点掉登录入口，把扫码框弹出来（登录完成后由登录看门狗把窗口收掉）。
  *
  * 三个前提，缺一个都不动手（宁可什么都不做，也不要在用户没看的时候乱点页面）：
- *   1) 面板开着且对用户可见（后台生图不碰）；
+ *   1) 豆包窗口开着且对用户可见（后台生图不碰）；
  *   2) 页面渲染到能判断登录态（否则会把「登录按钮还没渲染出来」当成已登录）；
  *   3) 确实未登录。
  *
@@ -1124,9 +1093,8 @@ async function probeLoginDialog(): Promise<{ markers: boolean; bigOverlays: numb
  * （踩过的坑：CDP 返回成功不等于事件到位，见 submitPrompt 的注释。）
  */
 export async function openDoubaoLogin(timeoutMs = 15_000): Promise<OpenLoginResult> {
-  const v = view;
-  // 只在"面板真的显示给用户看"时才动手：后台生图时不许在用户背后点页面
-  if (!v || v.webContents.isDestroyed() || !wantShown || !shown) {
+  // 只在"豆包窗口真的显示给用户看"时才动手：后台生图时不许在用户背后点页面
+  if (!isPanelVisible()) {
     return {
       ok: false,
       alreadyLoggedIn: false,
@@ -1192,7 +1160,7 @@ export async function openDoubaoLogin(timeoutMs = 15_000): Promise<OpenLoginResu
       ok: false,
       alreadyLoggedIn: false,
       dialogOpened: false,
-      message: "没在豆包页面上找到「登录」入口（可能页面还没加载完，或豆包已改版）。请点面板右上角「重载」再试。",
+      message: "没在豆包页面上找到「登录」入口（可能页面还没加载完，或豆包已改版）。请点宝螺里的「重载」再试。",
     };
   }
 
@@ -1261,7 +1229,7 @@ async function fillPrompt(prompt: string, timeoutMs = 20_000): Promise<void> {
    * 等输入框出现，而不是查一次就下结论。
    * 豆包是 SPA：did-finish-load 只代表文档加载完，输入框还要再等一会儿才渲染出来
    * （实测文档加载完时页面上只有 1 张 20px 的图，输入框根本还没挂上）。
-   * 用户刚打开抽屉就点「一键生图」时正好会撞上这段窗口。
+   * 用户刚打开豆包窗口就点「一键生图」时正好会撞上这段窗口。
    */
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -1458,7 +1426,7 @@ async function submitPrompt(timeoutMs = 5000): Promise<void> {
 /**
  * 页面上现在有没有可输入的编辑器（快速探一次，不等）。
  *
- * 用来判断「抽屉里这一页还是不是生图页」：用户在豆包里点进别的会话/首页之后，
+ * 用来判断「豆包窗口里这一页还是不是生图页」：用户在豆包里点进别的会话/首页之后，
  * 页面上就没有我们认得的那个输入框了，直接填词必然失败。
  */
 async function hasPromptEditor(): Promise<boolean> {
@@ -1468,7 +1436,7 @@ async function hasPromptEditor(): Promise<boolean> {
 /**
  * 把页面带回生图页。
  *
- * 抽屉是「关掉只隐藏、不销毁」的，所以页面可能停在：
+ * 豆包窗口是「关掉只隐藏、不销毁」的，所以页面可能停在：
  *   - 用户手动切过去的别的豆包会话；
  *   - 上一次加载失败/还卡在 loading；
  * 这两种情况填词都会失败（实测报「没能把提示词填进豆包输入框」）。
@@ -1494,7 +1462,7 @@ async function ensureImagePage(timeoutMs = 30_000): Promise<void> {
   }
   setStatus("ready", "");
   throw new DoubaoError(
-    "豆包页面可能已改版：里面没有可用的输入框。请点面板右上角「重载」后重试，或打开豆包窗口把画面提示词手动输进去生图。",
+    "豆包页面可能已改版：里面没有可用的输入框。请点宝螺里的「重载」后重试，或打开豆包窗口把画面提示词手动输进去生图。",
     "no-editor"
   );
 }
@@ -1947,25 +1915,23 @@ export async function generateImagesFromPrompt(
 
 /** 重新加载（加载失败时给用户一个重试入口） */
 export function reloadDoubao(): DoubaoState {
-  if (view && !view.webContents.isDestroyed()) {
+  if (hasPanel()) {
     open = true;
-    // 这是用户从抽屉里点的「重载」，看完得给他看
-    wantShown = true;
     setFrozen(false);
-    shown = false;
-    view.setVisible(false);
+    // 用户点的「重载」：窗口本来就看得见，保持亮着，重载时别把白页藏起来
+    panelWin!.show();
     setStatus("loading", "正在重新打开豆包…");
-    // 重载等于把面板重新摆给用户看：看门狗也跟着重新起步
+    // 重载等于把窗口重新摆给用户看：看门狗也跟着重新起步
     startLoginWatch();
-    view.webContents.loadURL(targetUrl()).catch((e) => {
+    panelWin!.webContents.loadURL(targetUrl()).catch((e) => {
       console.error("[doubao] 重载失败：", e?.message ?? e);
       setStatus("error", "豆包页面没能打开（网络不通，或豆包已改版）。点「重载」再试一次。");
     });
     return currentState();
   }
   /*
-   * 没有面板视图、只有离屏 worker：真正加载中时的重试出口（生图那边页面挂了也能救回来）。
-   * 重载后面板并不会因此显示出来 —— worker 一直是"用户看不见"的。
+   * 没有豆包窗口、只有离屏 worker：真正加载中时的重试出口（生图那边页面挂了也能救回来）。
+   * 重载后窗口并不会因此显示出来 —— worker 一直是"用户看不见"的。
    */
   if (workerWin && !workerWin.isDestroyed()) {
     workerLoaded = false;
@@ -1985,7 +1951,7 @@ export function reloadDoubao(): DoubaoState {
 /**
  * 把分区的登录态落到磁盘。
  *
- * 数据目录迁移前请先调 releaseDoubaoBeforeMigration()：视图开着时 Chromium
+ * 数据目录迁移前请先调 releaseDoubaoBeforeMigration()：页面开着时 Chromium
  * 一直占着分区的 cookie / 缓存文件，直接复制会拷到半截状态。
  *
  * 必须两个都调：
@@ -1994,7 +1960,7 @@ export function reloadDoubao(): DoubaoState {
  *     用户刚登录的状态漏掉（实测：源目录文件里没有该 cookie，复制过去自然也没有）。
  *   - flushStorageData()：刷 localStorage / IndexedDB 等站点存储。
  *
- * 关抽屉、迁移数据目录前都会调它。
+ * 关豆包窗口、迁移数据目录前都会调它。
  */
 export function flushDoubaoStorage(): void {
   try {
@@ -2002,19 +1968,19 @@ export function flushDoubaoStorage(): void {
     void ses.cookies.flushStore().catch(() => {});
     ses.flushStorageData();
   } catch {
-    /* 没有这个分区（从没打开过抽屉）就算了 */
+    /* 没有这个分区（从没打开过豆包窗口）就算了 */
   }
 }
 
 /**
  * 数据目录迁移前调用：先释放文件占用，再刷盘。
  *
- * 视图活着的时候 Chromium 一直占着分区的 cookie / 缓存文件，复制会拷到半截状态。
- * 所以先把视图整个销毁（destroyView 内部会刷一次盘），迁移完用户重开抽屉即可——
+ * 页面活着的时候 Chromium 一直占着分区的 cookie / 缓存文件，复制会拷到半截状态。
+ * 所以先把豆包窗口整个销毁（destroyPanel 内部会刷一次盘），迁移完用户重开即可——
  * 登录态在磁盘上，跟着数据目录一起走。
  */
 export function releaseDoubaoBeforeMigration(): void {
-  destroyView();
+  destroyPanel();
   destroyWorker();
   flushDoubaoStorage();
 }

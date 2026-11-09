@@ -49,18 +49,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     return;
   }
   // 豆包是 SPA：文档加载完不代表输入框已经渲染出来，等它出现
+  // （v1.0.0 起豆包是独立 BrowserWindow：主窗口之外的那个就是它）
+  const panel = () => BrowserWindow.getAllWindows().find((w) => w !== win && !w.isDestroyed());
   const inputDeadline = Date.now() + 30000;
   while (Date.now() < inputDeadline) {
-    const has = await win.contentView.children
-      .find((x) => x.webContents)
+    const has = await panel()
       .webContents.executeJavaScript(`!!document.querySelector('[contenteditable="true"]')`, true);
     if (has) break;
     await sleep(500);
   }
   await sleep(1500);
 
-  const v = win.contentView.children.find((x) => x.webContents);
-  const wc = v.webContents;
+  const wc = panel().webContents;
   const url = wc.getURL();
   check(/doubao\.com/.test(url), "已打开豆包页面", url);
 

@@ -3,6 +3,7 @@
  * 主进程 IPC contract 与 renderer 通过这套类型对齐。
  */
 import type { ImageProviderKey } from "./image-providers";
+import type { RuntimeId, RuntimePrefs } from "./runtime-types";
 
 /** 素材捕手支持的视频平台 */
 export type MediaPlatform =
@@ -159,6 +160,14 @@ export interface AppSettings {
    * 不设就按设置里的音色/运镜默认值来。图文解说走的是另一条链路（分镜工作台），暂不用它。
    */
   defaultTemplateId?: string;
+  /**
+   * 是否显示「模板」相关的按钮与操作（对话模式 / 图文解说共用这一个开关）。
+   *
+   * **未设置 = 关**：默认界面干净，只有「画布 / 分镜」本身的配置项；
+   * 打开后才露出模板入口（应用 / 保存为模板 / 更新模板 / 保存分镜模板）与标题上的模板名。
+   * 仅仅影响界面显隐，模板数据本身照旧保存在 records 里，关掉再打开不会丢。
+   */
+  templatesEnabled?: boolean;
   /** 用户勾选的常用音色 ID；为空数组/未设置时显示全部音色 */
   favoriteVoices?: string[];
   /** 本地声音克隆服务（Genie-TTS / GPT-SoVITS）地址 */
@@ -190,6 +199,33 @@ export interface AppSettings {
   imageProvider?: ImageProviderKey;
   /** ModelScope 生图配置（生图引擎选 modelscope 时生效） */
   modelscopeImage?: ModelScopeImageSettings;
+  /**
+   * 已安装的插件 key 列表（见 shared/plugins.ts）。
+   * **未设置 = 全部安装**（老配置不变）；交空数组 = 全部卸载。
+   * 卸载只影响界面入口（左侧导航 / 工作台「＋」菜单），主进程能力不删。
+   */
+  installedPlugins?: string[];
+  /**
+   * 上次写 `installedPlugins` 时程序认识的全部插件 key（由主进程自动维护，界面不改）。
+   * 用来区分「用户卸掉的」和「升级后新上架的」：不在本名单里的 key 视为新插件，自动装上。
+   * 见 shared/plugins.ts 的 effectiveInstalledPlugins。
+   */
+  knownPlugins?: string[];
+  /**
+   * 集成运行时（设置 → 运行时）。
+   *
+   * **同一时间只有一个**：`activeId` 存的就是那个已被应用的运行时，
+   * 应用新的会直接覆盖旧的（界面因此没有"取消应用"这一步，和"默认模板"一个道理）。
+   * 没设置 = 没应用，对话区继续走本地规则链路。
+   */
+  runtime?: {
+    activeId: RuntimeId;
+    /**
+     * 每个运行时各记一份"模型 + 权限范围"：换到别的运行时再换回来，
+     * 还是上次挑的那个（不记的话每次切都要重选一遍）。
+     */
+    prefs?: Partial<Record<RuntimeId, Partial<RuntimePrefs>>>;
+  };
 }
 
 /** ModelScope API-Inference 生图配置 */
@@ -413,60 +449,4 @@ export interface ComposeSnapshot {
   /** 开始时刻：界面切回来时秒表要接着走，不能从 0 重来 */
   startedAt: number;
   updatedAt: number;
-}
-
-/**
- * 变声器（方案 A）：把一段音频/视频里的人声转成文字，再用指定音色重新合成。
- * 与 B 方案（真·语音转换 SVC）的区别：不保留原声语气/停顿/语速，但不需要任何新模型或显卡。
- */
-export type VoiceConvertStage =
-  /** 首次使用：下载本地识别模型（约 150 MB） */
-  | "model-download"
-  /** 从原文件里抽 16kHz 单声道人声 */
-  | "extract-audio"
-  /** Whisper 识别文字 */
-  | "transcribe"
-  /** 用新音色逐句重新配音 */
-  | "synthesize"
-  /** 拼接成一条音频 */
-  | "merge"
-  | "done";
-
-export interface VoiceConvertRequest {
-  /** 源文件：音频或视频（视频会自动抽音轨） */
-  inputPath: string;
-  /** 音色值：Edge 音色 ID 或 clone:<id> */
-  voice: string;
-  /** 以下三个只对在线音色生效（克隆音色的语速/音调由模型决定） */
-  rate?: number;
-  pitch?: number;
-  volume?: number;
-  requestId?: string;
-}
-
-export interface VoiceConvertProgress {
-  requestId?: string;
-  stage: VoiceConvertStage;
-  /** 整条流水线进度 0..100（阶段加权：识别 0~45、配音 45~95、拼接 95~100） */
-  percent: number;
-  /** 识别模型下载进度（stage=model-download 时可用） */
-  received?: number;
-  total?: number;
-  /** 已重配音句数 / 总句数（stage=synthesize 时可用） */
-  current?: number;
-  totalLines?: number;
-  /** 识别过程中的实时文本行 */
-  line?: string;
-  message?: string;
-}
-
-export interface VoiceConvertResult {
-  /** 变声后的音频（wav，32kHz 单声道） */
-  audioPath: string;
-  /** 识别出的句子数 */
-  segmentCount: number;
-  /** 成功重新配音的句子数 */
-  doneCount: number;
-  /** 成品时长（秒） */
-  durationSec: number;
 }

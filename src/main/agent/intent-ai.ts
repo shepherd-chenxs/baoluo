@@ -7,21 +7,18 @@
  * 失败策略：没配 Key / 请求失败 / 超时 / 返回不可信 → 一律返回 null，
  * 由调用方（router.parseInstructionSmart）退回规则结果。AI 是增强，不是依赖。
  */
-import { net } from "electron";
-import { withNetworkRetry } from "../net-retry";
 import { parseAiJson } from "../ai-json";
-import * as settings from "../dialogue/settings";
+import { llmComplete, llmRoute } from "../llm";
 import type { AgentIntent } from "../../shared/agent-types";
 
-/** 分类是小事：15 秒足够，等久了不如直接退回规则结果 */
-const REQUEST_TIMEOUT_MS = 15_000;
+/** 分类是小事：等久了不如直接退回规则结果（运行时冷启动会慢一点，给到 45 秒） */
+const REQUEST_TIMEOUT_MS = 45_000;
 
 /** 模型能选的意图（unknown 也算一种答案：模型明确说"我也没听懂"） */
 const INTENTS: AgentIntent[] = [
   "download",
   "dialogue-video",
   "narration-video",
-  "voice-convert",
   "tts",
   "asr",
   "sniff",
@@ -35,7 +32,6 @@ function systemPrompt(): string {
 - download：下载某平台视频的无水印原片（抖音/快手/B站/小红书）
 - dialogue-video：做一个「甲方/乙方双人对话」形式的视频
 - narration-video：做一个「单人图文解说」形式的视频（一张图一段旁白，AI 出分镜）
-- voice-convert：把已有音视频里的人声换成另一个音色重新念
 - tts：把一段文字念成音频
 - asr：把音视频文件识别成文字
 - sniff：拆解一条爆款视频、总结可复用的方法
@@ -52,8 +48,8 @@ function systemPrompt(): string {
 8. 拿不准就 unknown，不要硬猜。
 
 【重要】下面会给一份"这句话里检测到的确定信息"。这些是程序解析出来的事实，比你的猜测可靠：
-- 检测到**本地音视频文件**时：只要用户想对这段素材做处理（换声音/换音色/识别/转文字/加字幕），
-  一律选 voice-convert 或 asr，**不要选 dialogue-video/narration-video**——
+- 检测到**本地音视频文件**时：只要用户想对这段素材做处理（识别/转文字/加字幕），
+  一律选 asr，**不要选 dialogue-video/narration-video**——
   那些是"从头做一条新视频"，而用户手上已经有素材了。
 - 检测到**链接**时：如果用户只想拿到原片 → download；想拆解方法论 → sniff；
   想基于它做视频 → dialogue-video/narration-video（按上面规则）。`;
@@ -116,46 +112,22 @@ function sanitize(v: unknown): IntentGuess | null {
 export async function classifyIntent(text: string, facts?: IntentFacts): Promise<IntentGuess | null> {
   const trimmed = (text ?? "").trim();
   if (!trimmed) return null;
-  const s = settings.getSettings();
-  if (!s.apiKey?.trim()) return null;
-  const base = (s.baseUrl || "https://api.deepseek.com/v1").replace(/\/+$/, "");
+  if (llmRoute().source === "none") return null;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const res = await withNetworkRetry(undefined, () =>
-      net.fetch(base + "/chat/completions", {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${s.apiKey.trim()}`,
-        },
-        body: JSON.stringify({
-          model: s.model || "deepseek-chat",
-          messages: [
-            { role: "system", content: systemPrompt() },
-            { role: "user", content: `用户说：${trimmed.slice(0, 500)}${factsBlock(facts)}` },
-          ],
-          temperature: 0,
-          max_tokens: 60,
-          stream: false,
-        }),
-      })
-    );
-    if (!res.ok) return null;
-    const data = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string | null; reasoning_content?: string | null } }>;
-    };
-    const msg = data.choices?.[0]?.message ?? {};
-    // content 优先、reasoning 仅兜底（拼接会弄脏 JSON，实测踩过）
-    const raw = String(msg.content ?? "").trim() || String(msg.reasoning_content ?? "");
-    if (!raw) return null;
+    const raw = await llmComplete({
+      system: systemPrompt(),
+      user: `用户说：${trimmed.slice(0, 500)}${factsBlock(facts)}`,
+      json: true,
+      temperature: 0,
+      maxTokens: 60,
+      timeoutMs: REQUEST_TIMEOUT_MS,
+      label: "识别意图",
+    });
+    if (!raw.trim()) return null;
     return sanitize(parseAiJson(raw));
   } catch {
     // 超时/断网/解析不了：静默退回规则，不打扰用户
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }

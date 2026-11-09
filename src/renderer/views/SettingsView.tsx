@@ -6,8 +6,11 @@ import { usePageActive } from "../components/KeepAlive";
 import AiPage from "./settings/AiPage";
 import ClonePage from "./settings/ClonePage";
 import GeneralPage from "./settings/GeneralPage";
+import PluginsPage from "./settings/PluginsPage";
+import RuntimePage from "./settings/RuntimePage";
 import SubtitlePage from "./settings/SubtitlePage";
 import VoicesPage from "./settings/VoicesPage";
+import type { PluginKey } from "../../shared/plugins";
 
 const PAGE_META: Record<SettingsPageKey, { title: string; subtitle: string }> = {
   subtitle: { title: "字幕设置", subtitle: "对话视频字幕的显示参数" },
@@ -17,22 +20,37 @@ const PAGE_META: Record<SettingsPageKey, { title: string; subtitle: string }> = 
     subtitle:
       "启用自动配置环境，首次下载离线语音模型，本地离线运行；停用即时释放系统资源。克隆音色保留在本地，不会上传到互联网。",
   },
-  ai: { title: "AI 服务", subtitle: "文本模型（写脚本/分镜）与生图引擎的连接配置" },
+  ai: {
+    title: "AI 服务",
+    subtitle: "没接运行时才用这里的文本模型兜底；生图引擎在「插件」里",
+  },
+  plugins: { title: "插件", subtitle: "按需安装功能模块，装了才会出现在导航和工作台「＋」菜单里" },
+  runtime: {
+    title: "运行时",
+    subtitle:
+      "识别本机装好的智能体 CLI（Codex / Claude Code / Gemini），应用其中一个接管对话区，也负责写分镜/文案；同一时间只允许一个。",
+  },
   general: { title: "通用设置", subtitle: "视频输出等全局配置" },
 };
 
 export default function SettingsView({
   page,
   nav,
+  list,
   doubaoOpen = false,
   onToggleDoubao,
+  onPluginsChanged,
 }: {
   page: SettingsPageKey;
   /** 左栏顶部的导航块（App 传下来的 SideNav），二级菜单（五个子页）就在导航里 */
   nav?: ReactNode;
-  /** 豆包抽屉开合（抽屉本体挂在 App 最外层）：AI 服务页里的豆包登录入口点它 */
+  /** 导航下方的任务列表（工作台左栏同款）：左栏不再因为切到设置页而空掉 */
+  list?: ReactNode;
+  /** 豆包独立窗口开合（窗口本体挂在 App 最外层）：插件页的豆包配置窗口点它 */
   doubaoOpen?: boolean;
   onToggleDoubao?: () => void;
+  /** 插件装/卸后回传最新列表：App 据此即时刷新左侧导航 */
+  onPluginsChanged?: (keys: PluginKey[]) => void;
 }) {
   const meta = PAGE_META[page];
   const [cloneOnline, setCloneOnline] = useState<boolean | null>(null);
@@ -64,7 +82,7 @@ export default function SettingsView({
   }, [page, pageActive]);
 
   return (
-    <NavPage nav={nav}>
+    <NavPage nav={nav} list={list}>
       <div className="view settings-view">
       <h2 className="settings-page-title">
         {meta.title}
@@ -78,7 +96,15 @@ export default function SettingsView({
       {page === "subtitle" && <SubtitlePage />}
       {page === "voices" && <VoicesPage />}
       {page === "clone" && <ClonePage />}
-      {page === "ai" && <AiPage doubaoOpen={doubaoOpen} onToggleDoubao={onToggleDoubao} />}
+      {page === "ai" && <AiPage />}
+      {page === "runtime" && <RuntimePage />}
+      {page === "plugins" && (
+        <PluginsPage
+          onChanged={onPluginsChanged}
+          doubaoOpen={doubaoOpen}
+          onToggleDoubao={onToggleDoubao}
+        />
+      )}
       {page === "general" && <GeneralPage />}
       </div>
     </NavPage>

@@ -2,14 +2,12 @@
  * v0.6.0 爆款嗅探：把一条爆款视频的转写文案拆成“可复用方法”。
  * 只分析结构和方法，不产出可照搬的文案。
  */
-import { net } from "electron";
-import { withNetworkRetry } from "../net-retry";
 import { parseAiJson } from "../ai-json";
 import { VIRAL_TRIGGERS, isViralTrigger } from "../../shared/viral-triggers";
 import type { SniffAnalysis } from "../../shared/sniff-types";
-import * as settings from "../dialogue/settings";
+import { llmComplete, llmRoute } from "../llm";
 
-const REQUEST_TIMEOUT_MS = 120_000;
+const REQUEST_TIMEOUT_MS = 240_000;
 
 const SYSTEM_PROMPT = `你是短视频爆款拆解师，专门帮创作者看懂"这条视频为什么能爆"。
 请严格遵守：
@@ -70,76 +68,36 @@ export async function analyzeTranscript(input: {
 转写文案：
 ${transcript}`;
 
-  const s = settings.getSettings();
-  if (!s.apiKey?.trim()) {
-    throw new Error("还没有配置 AI 服务（API Key），请先到「设置 → AI 服务」填写。");
-  }
-  const base = (s.baseUrl || "https://api.deepseek.com/v1").replace(/\/+$/, "");
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  const onExternalAbort = () => controller.abort();
-  input.signal?.addEventListener("abort", onExternalAbort, { once: true });
+  const route = llmRoute();
+  if (route.source === "none") throw new Error(route.message ?? "还没有能写文案的模型。");
+
   let lastError: Error | null = null;
-  try {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const res = await withNetworkRetry(input.signal, () =>
-        net.fetch(base + "/chat/completions", {
-          method: "POST",
-          signal: controller.signal,
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${s.apiKey.trim()}`,
-          },
-          body: JSON.stringify({
-            model: s.model || "deepseek-chat",
-            messages: [
-              { role: "system", content: SYSTEM_PROMPT },
-              { role: "user", content: user },
-            ],
-            temperature: 0.5,
-            response_format: { type: "json_object" },
-            max_tokens: 4096,
-            stream: false,
-          }),
-        })
-      );
-      if (!res.ok) {
-        let detail = "";
-        try {
-          const err = (await res.json()) as { error?: { message?: string } };
-          detail = err?.error?.message ?? "";
-        } catch {
-          /* noop */
-        }
-        if (res.status === 401) {
-          throw new Error("AI 服务鉴权失败（Key 无效，或这个服务商不需要 Key），请到「设置 → AI 服务」检查。");
-        }
-        throw new Error(`AI 服务请求失败（HTTP ${res.status}）${detail ? `：${detail}` : ""}`);
-      }
-      const data = (await res.json()) as {
-        choices?: Array<{ message?: { content?: string | null; reasoning_content?: string | null } }>;
-      };
-      const raw = data.choices?.[0]?.message ?? {};
-      // content 优先（干净 JSON），reasoning 只在 content 为空时兜底 —— 拼接会弄脏 JSON（实测踩过）
-const content = String(raw.content ?? "").trim() || String(raw.reasoning_content ?? "").trim();
-      if (!content.trim()) throw new Error("AI 返回为空，请稍后重试。");
-      try {
-        return normalize(parseAiJson(content));
-      } catch (e: any) {
-        lastError = e;
-        if (!/JSON|缺少必要字段/.test(e?.message ?? "")) throw e;
-      }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    input.signal?.throwIfAborted();
+    // 第二次把「上次格式不对」告诉它：原样再问一遍大概率还是同样的坏格式
+    const prompt =
+      attempt === 0
+        ? user
+        : `${user}
+
+注意：上一次输出无法解析（${lastError?.message ?? "格式错误"}）。这次请严格只输出一个合法的 JSON 对象：以 { 开头、} 结尾，所有键名和字符串值都用半角双引号，不要 Markdown 代码块，不要任何解释。`;
+    const raw = await llmComplete({
+      system: SYSTEM_PROMPT,
+      user: prompt,
+      json: true,
+      temperature: 0.5,
+      maxTokens: 4096,
+      timeoutMs: REQUEST_TIMEOUT_MS,
+      signal: input.signal,
+      label: "拆解爆款",
+    });
+    try {
+      return normalize(parseAiJson(raw));
+    } catch (e: any) {
+      lastError = e;
+      // 格式问题自动重试一次；连不上/取消之类直接抛给上层
+      if (!/JSON|缺少必要字段/.test(e?.message ?? "")) throw e;
     }
-  } catch (e: any) {
-    // 先判"用户取消"再判超时：两个来源都抛 AbortError，顺序反了取消会被说成超时
-    if (input.signal?.aborted) throw new Error("已取消");
-    if (e?.name === "AbortError" || String(e?.message ?? "").includes("aborted")) {
-      throw new Error("AI 拆解超时，请重试或检查网络。");
-    }
-    throw e;
-  } finally {
-    clearTimeout(timer);
-    input.signal?.removeEventListener("abort", onExternalAbort);
   }
   throw lastError ?? new Error("AI 拆解结果无法解析，请重试。");
 }

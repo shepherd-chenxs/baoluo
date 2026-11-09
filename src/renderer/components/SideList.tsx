@@ -12,17 +12,22 @@ export interface SideListProps {
   nav?: ReactNode;
   /** 左栏顶部的大标题（页面名）。二级菜单进左栏后页名会重复，可以不给 */
   title?: string;
-  /** 标题下面那行的小节名（方案 / 记录 / 历史…） */
-  section: string;
+  /** 左栏小节名（方案 / 记录 / 历史…）。不给就不画这一行——列表整体挪去右边时用 */
+  section?: string;
   /** 小节名右边的动作（通常是「＋ 新建」） */
   action?: ReactNode;
-  /** 有内容就渲染 items，没有就渲染 empty */
-  hasItems: boolean;
+  /** 有内容就渲染 items，没有就渲染 empty。不给（undefined）就整个不画——列表挪去右边时用 */
+  hasItems?: boolean;
   empty?: ReactNode;
   /** 列表里的行 */
   items?: ReactNode;
   /** 左栏底部常驻的东西（如整页级入口）；列表用 flex:1 占满剩余空间，它自然贴底 */
   footer?: ReactNode;
+  /**
+   * 右侧列表栏：历史 / 记录这类「翻旧账」的东西挪到工作区右边（左栏只留导航）。
+   * 结构与左栏同款（.split-list），只是分隔线画在左边。
+   */
+  right?: ReactNode;
   /** 右区 */
   children: ReactNode;
 }
@@ -36,26 +41,34 @@ export default function SideList({
   empty,
   items,
   footer,
+  right,
   children,
 }: SideListProps) {
+  /* 左栏没有导航、也没有任何列表内容时整个不画：插件页不传 nav 就全宽铺开 */
+  const hasLeft = !!(nav || title || section || footer || hasItems !== undefined);
   return (
     <div className="split">
-      <aside className="split-list">
-        {nav}
-        {title && <h2 className="split-title">{title}</h2>}
-        <div className="split-list-head">
-          <span className="panel-title">{section}</span>
-          {action}
-        </div>
-        {hasItems ? (
-          <div className="split-items">{items}</div>
-        ) : (
-          <div className="split-empty">{empty}</div>
-        )}
-        {/* 底部入口：flex 里 items 占满剩余空间，所以它自然贴在下面 */}
-        {footer && <div className="split-foot">{footer}</div>}
-      </aside>
+      {hasLeft && (
+        <aside className="split-list">
+          {nav}
+          {title && <h2 className="split-title">{title}</h2>}
+          {section && (
+            <div className="split-list-head">
+              <span className="panel-title">{section}</span>
+              {action}
+            </div>
+          )}
+          {hasItems === undefined ? null : hasItems ? (
+            <div className="split-items">{items}</div>
+          ) : (
+            <div className="split-empty">{empty}</div>
+          )}
+          {/* 底部入口：flex 里 items 占满剩余空间，所以它自然贴在下面 */}
+          {footer && <div className="split-foot">{footer}</div>}
+        </aside>
+      )}
       <div className="split-work">{children}</div>
+      {right && <aside className="split-list split-list-right">{right}</aside>}
     </div>
   );
 }
@@ -64,12 +77,59 @@ export default function SideList({
  * 给本来没有左栏的页（素材捕手 / 语音三页 / 设置 / 关于）补一条左栏装导航：
  * 骨架与 SideList 同款（.split），右区就是页面原来的内容。
  */
-export function NavPage({ nav, children }: { nav?: ReactNode; children: ReactNode }) {
+export function NavPage({
+  nav,
+  list,
+  children,
+}: {
+  nav?: ReactNode;
+  /** 导航下方的任务列表（工作台左栏同款）：设置/关于等页也常驻这份列表 */
+  list?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <div className="split">
-      <aside className="split-list">{nav}</aside>
+      {/* 导航和列表都没给就不画左栏：插件页全宽铺开 */}
+      {(nav || list) && (
+        <aside className="split-list">
+          {nav}
+          {list}
+        </aside>
+      )}
       <div className="split-work">{children}</div>
     </div>
+  );
+}
+
+/**
+ * 列表头右侧的「＋ 新建」：全应用只此一颗。
+ *
+ * 以前每个页面各写一遍，慢慢裂成三种长相——插件页用灰底 `secondary`（底色与左栏
+ * `#f2f3f5` 同色，看着像一行灰字）、素材捕手用白底描边、工作台的会话/任务列表用
+ * 20×20 方块 ＋。同一个动作在不同页面长得不一样，用户就得重新认一遍。
+ *
+ * 定为「白底描边小按钮」：左栏是浅灰底，只有白底才立得起来。
+ */
+export interface ListAddButtonProps {
+  onClick: () => void;
+  /** 悬停说明：写清新建的是什么、动不动已有内容 */
+  title?: string;
+  disabled?: boolean;
+  /** 默认「新建」；需要更具体时传（如「新建任务」） */
+  label?: string;
+}
+
+export function ListAddButton({ onClick, title, disabled, label = "新建" }: ListAddButtonProps) {
+  return (
+    <button
+      type="button"
+      className="secondary small secondary-outlined list-add-btn"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+    >
+      ＋ {label}
+    </button>
   );
 }
 
@@ -79,6 +139,8 @@ export interface SideRowProps {
   meta?: ReactNode;
   /** 成片了没有：有就打绿标 */
   done?: boolean;
+  /** 绿标文字：默认「已成片」，素材记录这类用「已下载」 */
+  doneLabel?: string;
   /** 次行最右边的时间 */
   time?: string;
   active?: boolean;
@@ -95,6 +157,7 @@ export function SideRow({
   title,
   meta,
   done,
+  doneLabel,
   time,
   active,
   onOpen,
@@ -108,7 +171,7 @@ export function SideRow({
         <span className="side-item-title">{title}</span>
         <span className="side-item-meta">
           {meta}
-          {done && <span className="side-done">已成片</span>}
+          {done && <span className="side-done">{doneLabel ?? "已成片"}</span>}
           {time && <span>{time}</span>}
         </span>
       </button>

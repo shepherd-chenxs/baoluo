@@ -1,8 +1,7 @@
 /**
  * AI 服务商预设 —— 让「设置 → AI 服务」从"手抄 baseUrl"变成"选一家、填个 key"。
  *
- * 协议约定：所有预设都是 OpenAI 兼容的 /chat/completions（宝螺三个调用点只依赖这一种协议），
- * 本地网关（Ollama / LM Studio / OneAPI / vLLM）同样遵守，所以本地模型和云端模型没有区别。
+ * 协议约定：所有预设都是 OpenAI 兼容的 /chat/completions（宝螺三个调用点只依赖这一种协议）。
  */
 export interface AiProviderPreset {
   key: string;
@@ -22,7 +21,7 @@ export interface AiProviderPreset {
 export const AI_PROVIDERS: AiProviderPreset[] = [
   {
     key: "magpie",
-    label: "Magpie 网关（本机，多模型聚合）",
+    label: "Magpie 网关",
     baseUrl: "http://127.0.0.1:3425/v1",
     model: "group/group-baoluo",
     needsKey: true,
@@ -71,39 +70,6 @@ export const AI_PROVIDERS: AiProviderPreset[] = [
     model: "gpt-4o-mini",
     needsKey: true,
     keyUrl: "https://platform.openai.com/api-keys",
-    modelsPath: "/models",
-  },
-  {
-    key: "openrouter",
-    label: "OpenRouter（一家 key 用多家模型）",
-    baseUrl: "https://openrouter.ai/api/v1",
-    model: "anthropic/claude-3.5-haiku",
-    needsKey: true,
-    keyUrl: "https://openrouter.ai/keys",
-    modelsPath: "/models",
-  },
-  {
-    key: "ollama",
-    label: "Ollama（本地，默认 11434）",
-    baseUrl: "http://127.0.0.1:11434/v1",
-    model: "qwen2.5:7b",
-    needsKey: false,
-    modelsPath: "/models",
-  },
-  {
-    key: "lmstudio",
-    label: "LM Studio（本地，默认 1234）",
-    baseUrl: "http://127.0.0.1:1234/v1",
-    model: "local-model",
-    needsKey: false,
-    modelsPath: "/models",
-  },
-  {
-    key: "oneapi",
-    label: "OneAPI / NewAPI 网关（自建聚合）",
-    baseUrl: "http://127.0.0.1:3000/v1",
-    model: "gpt-4o-mini",
-    needsKey: true,
     modelsPath: "/models",
   },
 ];

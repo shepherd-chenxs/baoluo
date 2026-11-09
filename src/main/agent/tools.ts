@@ -27,7 +27,6 @@ import { parseMedia } from "../parser";
 import { downloadVideo, safeFileName } from "../downloader";
 import { transcribeVideo } from "../transcribe";
 import { cancelCompose, defaultOutputDir, runCompose } from "../dialogue/compose";
-import { runVoiceConvert } from "../dialogue/voice-convert";
 import { runSniff } from "../sniff/pipeline";
 import { prosodyPercent, TtsEngine } from "../dialogue/tts";
 import { cloneIdFromVoice, findCloneVoice, synthCloneSingle } from "../dialogue/clone-voice";
@@ -132,15 +131,6 @@ function fmtDuration(ms: number): string {
   const s = total % 60;
   return m > 0 ? `${m} 分 ${s} 秒` : `${s} 秒`;
 }
-
-const VC_STAGE_LABEL: Record<string, string> = {
-  "model-download": "首次使用，正在下载识别模型…",
-  "extract-audio": "正在提取人声…",
-  transcribe: "正在识别文案…",
-  synthesize: "正在逐句重新配音…",
-  merge: "正在拼接…",
-  done: "完成",
-};
 
 /** 解析链接：拿到标题、时长、播放地址 */
 const parseLinkTool: AgentToolSpec = {
@@ -385,8 +375,7 @@ const writeStoryboardTool: AgentToolSpec = {
   async run(ctx, step) {
     const topic = param(step, "topic") || ctx.state.meta?.title || ctx.state.transcript?.slice(0, 40) || "";
     if (!topic) throw new Error("给个主题或热点，我才知道要写什么。");
-    const dw = settings.getSettings();
-    if (!dw.apiKey?.trim()) throw new Error("还没配置 AI 服务（API Key），请先到「设置 → AI 服务」填写。");
+    // 模型从哪来（运行时 / AI 服务）由 llm 决定；这里不再前置拦 API Key
     const resolution = (param(step, "resolution") || "portrait") as VideoResolution;
     ctx.emit({ message: "AI 正在写分镜与画面提示词…" });
     const draft = await generateAiDraft(
@@ -736,41 +725,6 @@ const ttsTool: AgentToolSpec = {
   },
 };
 
-/** 变声：识别原文案 → 用目标音色重新念 */
-const voiceConvertTool: AgentToolSpec = {
-  kind: "voice-convert",
-  description: "把音视频里的人声识别出来，用指定音色重新念一遍",
-  async run(ctx, step) {
-    const inputPath = param(step, "inputPath") || ctx.state.videoPath || "";
-    if (!inputPath) throw new Error("先选一个音频或视频文件。");
-    if (!fs.existsSync(inputPath)) throw new Error(`文件找不到了：${inputPath}`);
-    const voice = param(step, "voice");
-    if (!voice) throw new Error("先选一个目标音色。");
-    const outputDir = path.join(ctx.workDir, "voice-convert");
-    ensureDir(outputDir);
-    ctx.emit({ message: "正在处理…" });
-    const r = await runVoiceConvert({
-      inputPath,
-      voice,
-      rate: numParam(step, "rate"),
-      outputDir,
-      requestId: `agent-${Date.now()}`,
-      signal: ctx.signal,
-      onProgress: (p) => {
-        const base = VC_STAGE_LABEL[p.stage] ?? "正在处理…";
-        const msg = p.current && p.totalLines ? `${base}（第 ${p.current}/${p.totalLines} 句）` : base;
-        ctx.emit({ percent: p.percent, message: msg });
-      },
-    });
-    return {
-      note: `${r.durationSec.toFixed(1)} 秒 · ${r.doneCount}/${r.segmentCount} 句`,
-      outputPath: r.audioPath,
-      resultKind: "audio",
-      patch: { outputPath: r.audioPath },
-    };
-  },
-};
-
 const TOOLS: Record<AgentStepKind, AgentToolSpec> = {
   "parse-link": parseLinkTool,
   download: downloadTool,
@@ -781,7 +735,6 @@ const TOOLS: Record<AgentStepKind, AgentToolSpec> = {
   compose: composeTool,
   "compose-narration": composeNarrationTool,
   "hot-story": hotStoryTool,
-  "voice-convert": voiceConvertTool,
   tts: ttsTool,
   sniff: sniffTool,
 };

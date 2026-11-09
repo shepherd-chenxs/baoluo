@@ -66,7 +66,7 @@ function migrateLegacyUserData(target: string) {
 /** 必须在任何模块读写 userData 之前调用（main 入口最先执行） */
 export function setupUserDataDir(): void {
   const target = currentDataDir();
-  // setPath 前先把目录建出来（新默认目录 C:\Baoluo\data 首次启动时还不存在）
+  // setPath 前先把目录建出来（全新安装时 %APPDATA%\Baoluo 还不存在）
   try {
     fs.mkdirSync(target, { recursive: true });
   } catch {
@@ -94,39 +94,51 @@ export function setupUserDataDir(): void {
 }
 
 // ---------------------------------------------------------------------------
-// 数据目录可配置（方案 A）：默认 C:\Baoluo\data，可在设置里换到别的盘
+// 数据目录可配置（方案 A）：默认 %APPDATA%\Baoluo，可在设置里换到别的盘
 // ---------------------------------------------------------------------------
 
-/** 默认数据目录：C:\Baoluo\data（固定短路径，和视频输出/素材目录同一处） */
-const DATA_DIR_DEFAULT = "C:\\Baoluo\\data";
-
-/** 老版本的默认数据目录：%APPDATA%\Baoluo（升级后要"认领"这里的老数据） */
-export function legacyDataDir(): string {
-  return path.join(app.getPath("appData"), USER_DATA_FOLDER);
-}
+/**
+ * v0.9.x 用过的默认数据目录（写死在 C 盘根下的短路径）。
+ * 从那个版本升级上来的人，数据还在那儿，必须就地认领——
+ * 否则等于让用户把 5 GB 模型和设置当"全新安装"丢掉。
+ */
+const LEGACY_SHORT_DATA_DIR = "C:\\Baoluo\\data";
 
 /**
- * 默认数据目录（同时也是"指针文件"所在的地方）。
+ * 默认数据目录：%APPDATA%\Baoluo，即 C:\Users\<用户>\AppData\Roaming\Baoluo。
+ * 这就是 Electron 的 userData 默认位置，也是 Windows 桌面应用的通行做法。
  * 可用环境变量 BAOLUO_DATA_DIR 覆盖——测试和便携部署会用到。
  */
 export function defaultDataDir(): string {
   const override = process.env.BAOLUO_DATA_DIR?.trim();
   if (override) return path.resolve(override);
-  return DATA_DIR_DEFAULT;
+  return path.join(app.getPath("appData"), USER_DATA_FOLDER);
+}
+
+/**
+ * 老版本（v0.9.x）的默认数据目录。
+ * 显式指定了 BAOLUO_DATA_DIR（测试/便携）时返回 null——别把真实机器上的老目录掺进来。
+ */
+export function legacyShortDataDir(): string | null {
+  if (process.env.BAOLUO_DATA_DIR?.trim()) return null;
+  return process.platform === "win32" ? LEGACY_SHORT_DATA_DIR : null;
 }
 
 /**
  * 指针文件：记录用户选的数据目录。
  * 必须留在默认目录里——数据搬到别处后，只有这里还能找到"数据到底在哪"。
- * 老用户可能把指针留在旧的 %APPDATA%\Baoluo 下，两处都要认。
+ * 老版本把指针写在旧的默认目录（C:\Baoluo\data），两处都要认。
  */
 export function dataRootPointerFile(): string {
   return path.join(defaultDataDir(), "data-root.txt");
 }
 
-/** 指针文件候选位置：新默认目录优先，其次旧默认目录（兼容已经迁移过的老用户） */
+/** 指针文件候选位置：新默认目录优先，其次老版本的默认目录（兼容升级上来的用户） */
 function pointerCandidates(): string[] {
-  return [dataRootPointerFile(), path.join(legacyDataDir(), "data-root.txt")];
+  const candidates = [dataRootPointerFile()];
+  const legacyShort = legacyShortDataDir();
+  if (legacyShort) candidates.push(path.join(legacyShort, "data-root.txt"));
+  return candidates;
 }
 
 /** 读取指针文件里的自定义目录（没有/无效则返回 null） */
@@ -157,15 +169,31 @@ function hasAppData(dir: string): boolean {
 /**
  * 当前生效的数据目录。
  *
- * 优先用指针；没有指针时，如果老目录 %APPDATA%\Baoluo 里已经有数据（老用户升级上来），
- * 就地认领它——否则改默认值等于把用户的模型、设置全丢了。
+ * 优先用指针；没有指针时按顺序认领已有数据：
+ *   1) 默认目录 %APPDATA%\Baoluo 里有数据 → 就地用它（正常/老老版本）
+ *   2) 老版本默认目录 C:\Baoluo\data 里有数据 → 就地认领并写指针（不搬那 5 GB）
+ * 两处都没有才是全新安装 → 用默认目录。
  */
 export function currentDataDir(): string {
   const pointed = readDataRoot();
   if (pointed) return pointed;
-  const legacy = legacyDataDir();
-  if (hasAppData(legacy)) return legacy;
-  return defaultDataDir();
+
+  const def = defaultDataDir();
+  if (hasAppData(def)) return def;
+
+  const legacyShort = legacyShortDataDir();
+  if (legacyShort && isDir(legacyShort) && hasAppData(legacyShort)) {
+    // 认领：写指针固定下来，之后设置里既能显示成"自定义"，也能一键改回默认
+    try {
+      writeDataRoot(legacyShort);
+    } catch {
+      /* 指针写不进去也先用着，下次启动再试 */
+    }
+    console.log("[userData] 认领老版本数据目录:", legacyShort);
+    return path.resolve(legacyShort);
+  }
+
+  return def;
 }
 
 /** 写入/清除指针文件（传 null 表示恢复默认） */

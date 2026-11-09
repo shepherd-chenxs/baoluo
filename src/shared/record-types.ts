@@ -6,13 +6,34 @@
  *
  * 只存"索引 + 内容"，成片、原片这类大文件仍在各自目录里，记录里只留路径。
  */
+import type { VideoMeta } from "./dialogue-types";
 
 /**
- * 三类作品记录 + 一类配置库（对话模板），各存一份文件、互不干扰。
+ * 三类作品记录 + 两类配置库（对话模板 / 图文解说分镜模板），各存一份文件、互不干扰。
  * 模板跟作品放同一套机制里：都是"有名字、能列表、能取回的一段内容"，
  * 差别只在内容是什么（模板存的是配置，不是脚本/报告）。
  */
-export type WorkRecordKind = "narration" | "dialogue" | "sniff" | "template";
+export type WorkRecordKind =
+  | "narration"
+  | "dialogue"
+  | "sniff"
+  | "material"
+  | "template"
+  | "narration-template";
+
+/**
+ * 素材捕手的一条下载记录（kind = "material"）。
+ *
+ * 原片不搬进来：记录只是"书签"——记住这条素材长什么样、从哪个链接来、落到哪个文件。
+ * 文件被用户删了，记录还在（列表看得出来，重新下载就行）。
+ */
+export interface MaterialRecordPayload {
+  meta: VideoMeta;
+  /** 本地文件路径；解析了但没下载时为空 */
+  savedPath?: string;
+  /** 原始分享链接（重新打开时填回输入框，方便再解析一次） */
+  source?: string;
+}
 
 /** 列表只用摘要，不必把整份内容读出来 */
 export interface WorkRecordSummary {

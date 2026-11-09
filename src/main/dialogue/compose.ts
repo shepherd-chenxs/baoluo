@@ -23,6 +23,7 @@ import * as settings from "./settings";
 import { VideoComposer, type ComposeSegment } from "./composer";
 import { DEFAULT_LOCAL_TTS_HOST, DEFAULT_LOCAL_TTS_PORT } from "../../shared/settings-defaults";
 import { describeFsError } from "../fsError";
+import { currentDataDir } from "../userData";
 
 interface ComposeRunArgs extends ComposeRequest {
   webContents: WebContents;
@@ -547,7 +548,7 @@ export async function runCompose(args: ComposeRunArgs): Promise<{ outputPath: st
   }
 }
 
-/** 默认输出目录：C:\Baoluo\data\dialogue-output（固定短路径，用户好找） */
+/** 默认输出目录：<数据目录>/dialogue-output（跟着数据目录走，用户好找） */
 export function defaultOutputDir(): string {
-  return "C:\\Baoluo\\data\\dialogue-output";
+  return path.join(currentDataDir(), "dialogue-output");
 }

@@ -121,7 +121,8 @@ const server = http.createServer((req, res) => {
     doubao.reloadDoubao();
     const deadline = Date.now() + 20000;
     while (Date.now() < deadline && doubao.getDoubaoState().status !== "ready") await sleep(100);
-    return win.contentView.children.find((v) => v.webContents).webContents;
+    // 豆包 v1.0.0 起是独立 BrowserWindow：主窗口之外的那个就是它
+    return BrowserWindow.getAllWindows().find((w) => w !== win && !w.isDestroyed()).webContents;
   };
 
   const MSG = [

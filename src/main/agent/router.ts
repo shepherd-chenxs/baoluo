@@ -132,7 +132,6 @@ const AT_INTENTS: Array<[RegExp, AgentIntent]> = [
   [/@(下载|素材|扒视频)/, "download"],
   [/@(对话|双人)/, "dialogue-video"],
   [/@(图文|解说|成片|热点)/, "narration-video"],
-  [/@(变声|配音)/, "voice-convert"],
   [/@(语音|朗读|念)/, "tts"],
   [/@(识别|听写|字幕)/, "asr"],
   [/@(爆款|嗅探|拆解)/, "sniff"],
@@ -210,7 +209,6 @@ export function parseByRules(raw: string): RuleParse {
   const resolution = extractResolution(text);
   const extra = { durationSec, resolution };
 
-  const wantsVoice = /变声|换声|换音色|重新配|重配|改.{0,4}声音|克隆音色/.test(text);
   const wantsTts = /语音合成|合成语音|朗读|念一遍|念一段|念一下|读出来|配音|tts/i.test(text);
   const wantsAsr = /语音识别|识别文字|转文字|转录|听写|提取文字|出字幕/.test(text);
   // 「热点成片」和「图文解说」是同一条链路：AI 出分镜（旁白 + 画面提示词）→ 用户生图 → 合成
@@ -220,20 +218,6 @@ export function parseByRules(raw: string): RuleParse {
   const wantsDownload = /下载|无水印|扒|提取文案|转录|转文字|文案/.test(text);
   // 显式 @ 点名优先于关键词猜测
   const forced = intentFromMention(text);
-
-  // 1) 变声：必须有本地文件（链接得先下下来，那是另一条流程）
-  if ((wantsVoice || forced === "voice-convert") && filePath) {
-    return {
-      confident: true,
-      result: {
-        intent: "voice-convert",
-        title: "音频 → 换音色重念",
-        params: { inputPath: filePath },
-        missing: [],
-        summary: "把这段音视频里的人声识别出来，再用你选的音色重新念一遍。",
-      },
-    };
-  }
 
   // 1.5) 语音识别：手上已经有本地文件了，直接出文案
   //（给的是链接就走后面的「下载」，先下下来再说）
@@ -259,7 +243,7 @@ export function parseByRules(raw: string): RuleParse {
   if (forced === "dialogue-video" || wantsDialogue)
     return { confident: true, result: scripted("dialogue-video", topic, link, extra) };
 
-  // 2.5) 语音合成：一段文字 → 一条音频（带文件的那种是「变声」，上面已经拦下了）
+  // 2.5) 语音合成：一段文字 → 一条音频（带文件的那种是「识别」，上面已经拦下了）
   if (forced === "tts" || (wantsTts && !filePath && !link)) {
     return {
       confident: true,
@@ -297,14 +281,12 @@ export function parseByRules(raw: string): RuleParse {
         title: "这个文件要做什么？",
         params: { inputPath: filePath },
         missing: ["要做什么"],
-        summary: `收到文件了：${filePath}\n想拿它做什么？说「变声」可以直接换音色重念。`,
+        summary: `收到文件了：${filePath}\n想拿它做什么？说「识别」可以直接出文案。`,
       },
     };
   }
 
   // 5) 说了动作但缺关键输入（模型也变不出文件/链接，不用再问）
-  if (forced === "voice-convert" || wantsVoice)
-    return { confident: true, result: missingInput("变声需要先给一个文件", "音视频文件", "变声要先把音频或视频拖进来（或把路径贴给我）。") };
   if (forced === "asr" || wantsAsr)
     return { confident: true, result: missingInput("语音识别需要先给一个音视频文件", "音视频文件", "把音频或视频拖进来（或把路径贴给我），我在本机把它识别成文字。") };
   if (forced === "download" || wantsDownload)
@@ -330,7 +312,7 @@ function noIdea(): AgentParseResult {
     params: {},
     missing: ["指令"],
     summary:
-      "可以直接贴一条视频链接（我下载无水印原片），也可以给一个主题（我写对话脚本并成片），给音频文件说「变声」或「识别」，或者给一段文字说「语音合成」。",
+      "可以直接贴一条视频链接（我下载无水印原片），也可以给一个主题（我写对话脚本并成片），给音频文件说「识别」，或者给一段文字说「语音合成」。",
   };
 }
 
@@ -368,16 +350,6 @@ export function resultForIntent(
             summary: "把视频下下来留在工作台，之后能单独拿去用。",
           }
         : missingInput("下载需要先给一个链接", "链接", "把抖音/快手/B站/小红书的分享文本或链接贴进来就行。");
-    case "voice-convert":
-      return filePath
-        ? {
-            intent: "voice-convert",
-            title: "音频 → 换音色重念",
-            params: { inputPath: filePath },
-            missing: [],
-            summary: "把这段音视频里的人声识别出来，再用你选的音色重新念一遍。",
-          }
-        : missingInput("变声需要先给一个文件", "音视频文件", "变声要先把音频或视频拖进来（或把路径贴给我）。");
     case "asr":
       return filePath
         ? {
@@ -460,8 +432,6 @@ export function intentLabel(intent: AgentIntent): string {
       return "对话视频";
     case "narration-video":
       return "图文解说";
-    case "voice-convert":
-      return "变声";
     case "tts":
       return "语音合成";
     case "asr":

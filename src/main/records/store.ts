@@ -22,7 +22,14 @@ import type {
 /** 每一种记录最多留这么多条 */
 const MAX_PER_KIND = 100;
 
-const KINDS: WorkRecordKind[] = ["narration", "dialogue", "sniff", "template"];
+const KINDS: WorkRecordKind[] = [
+  "narration",
+  "dialogue",
+  "sniff",
+  "material",
+  "template",
+  "narration-template",
+];
 
 export function recordsRoot(): string {
   return path.join(app.getPath("userData"), "records");

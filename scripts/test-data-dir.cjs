@@ -16,7 +16,8 @@ fs.rmSync(SANDBOX, { recursive: true, force: true });
 fs.mkdirSync(SANDBOX, { recursive: true });
 app.setPath("appData", SANDBOX);
 app.setPath("userData", path.join(SANDBOX, "Baoluo"));
-// 默认数据目录现在是写死的 C:\Baoluo\data，测试用环境变量把它指到沙箱
+// 默认数据目录是 %APPDATA%\Baoluo；这里把 appData 指到沙箱，
+// 再用环境变量兜一层，确保不会读到真实机器上的目录（也不会触发老目录认领）
 process.env.BAOLUO_DATA_DIR = path.join(SANDBOX, "Baoluo");
 
 let failures = 0;

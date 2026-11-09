@@ -5,6 +5,7 @@ import { effectiveFavoriteVoices, VOICE_OPTIONS } from "../../shared/voices";
 import BeeSelect from "../components/BeeSelect";
 import { NavPage } from "../components/SideList";
 import { HourglassIcon, SpeakerIcon } from "../components/VoiceIcons";
+import { ttsErrorText } from "../lib/err-text";
 
 declare global {
   interface Window {
@@ -16,7 +17,7 @@ declare global {
 }
 
 /** 音色试听默认示例句 */
-const PREVIEW_TEXT = "你好，我是宝螺。今天天气不错，出来走走，心情也跟着好了起来。";
+const PREVIEW_TEXT = "你只管努力，剩下的交给时间。";
 
 function fmtProsody(n: number): string {
   if (n === 0) return "默认";
@@ -151,10 +152,7 @@ export default function TtsView({ nav }: { nav?: ReactNode } = {}) {
         setPreviewStatus({ state: "playing" });
       })
       .catch((e) => {
-        const msg = e?.message ?? String(e);
-        const friendly = /timeout|timed out/i.test(msg)
-          ? "该音色当前不可用（合成超时），请换个音色试试。"
-          : msg;
+        const friendly = ttsErrorText(e);
         setPreviewStatus({ state: "error", message: friendly });
         window.alert(friendly);
       })

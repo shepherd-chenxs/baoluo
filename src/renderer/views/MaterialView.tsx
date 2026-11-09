@@ -4,14 +4,19 @@ import type {
   BeeApi,
   DownloadProgress,
   MaterialsApi,
+  MediaApi,
+  RecordsApi,
   VideoMeta,
 } from "../../preload";
-import { NavPage } from "../components/SideList";
+import type { MaterialRecordPayload, WorkRecordSummary } from "../../shared/record-types";
+import { ListAddButton, NavPage, SideRow, formatListTime } from "../components/SideList";
 
 declare global {
   interface Window {
     bee: BeeApi;
     materials: MaterialsApi;
+    media: MediaApi;
+    records: RecordsApi;
   }
 }
 
@@ -57,8 +62,24 @@ export default function MaterialView({ nav, onRequestTranscribe }: MaterialViewP
   const [savedUrl, setSavedUrl] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [autoDownload, setAutoDownload] = useState(true);
+  /** 下载记录（左栏「记录」）：一条 = 一次下好的素材，存 meta + 落地路径 */
+  const [records, setRecords] = useState<WorkRecordSummary[]>([]);
+  const [activeRecordId, setActiveRecordId] = useState<string | null>(null);
 
   const downloadedRef = useRef<Set<string>>(new Set());
+  const pasteRef = useRef<HTMLTextAreaElement>(null);
+
+  async function refreshRecords(): Promise<void> {
+    try {
+      setRecords(await window.records.list("material"));
+    } catch {
+      /* 记录读不出来就当空的，不影响下载本身 */
+    }
+  }
+
+  useEffect(() => {
+    void refreshRecords();
+  }, []);
 
   useEffect(() => {
     const offDownload = window.materials.onProgress((p) => {
@@ -138,10 +159,77 @@ export default function MaterialView({ nav, onRequestTranscribe }: MaterialViewP
         durationMs: m.duration,
       });
       setSavedPath(res.path);
+      await rememberDownload(m, res.path);
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
       setDownloading(false);
+    }
+  }
+
+  /**
+   * 下好一条就记一条。
+   *
+   * id 用 `平台:视频id` 拼死，同一条素材再下一次是**更新那一条**（时间挪到最新），
+   * 不会在左栏堆出一串一模一样的。
+   */
+  async function rememberDownload(m: VideoMeta, savedPath: string): Promise<void> {
+    const recId = `mat-${m.platform}-${m.id}`;
+    const label = PLATFORM_LABELS[m.platform]?.name ?? "网页";
+    const subtitle = m.duration ? `${label} · ${fmtDuration(m.duration)}` : label;
+    try {
+      await window.records.save({
+        id: recId,
+        kind: "material",
+        title: m.title || "(无标题)",
+        subtitle,
+        outputPath: savedPath,
+        payload: { meta: m, savedPath, source: text.trim() } satisfies MaterialRecordPayload,
+      });
+      setActiveRecordId(recId);
+      await refreshRecords();
+    } catch {
+      /* 记不下来也不能反过来把已经下好的片子弄成失败 */
+    }
+  }
+
+  /** 点开一条记录：把当时的封面 / 标题 / 本地文件 / 原链接都摆回来 */
+  async function openRecord(id: string): Promise<void> {
+    try {
+      const rec = await window.records.get<MaterialRecordPayload>("material", id);
+      if (!rec?.payload?.meta) return;
+      setMeta(rec.payload.meta);
+      setSavedPath(rec.payload.savedPath ?? null);
+      setText(rec.payload.source ?? "");
+      setError(null);
+      setProgress(null);
+      setActiveRecordId(id);
+    } catch (e: any) {
+      setError(e?.message || String(e));
+    }
+  }
+
+  async function removeRecord(id: string, title: string): Promise<void> {
+    if (!window.confirm(`删除这条记录？\n\n「${title}」\n\n只删记录，已经下载的文件不会被删掉。`)) return;
+    try {
+      await window.records.remove("material", id);
+      if (activeRecordId === id) setActiveRecordId(null);
+      await refreshRecords();
+    } catch (e: any) {
+      setError(e?.message || String(e));
+    }
+  }
+
+  async function clearRecords(): Promise<void> {
+    if (!records.length) return;
+    if (!window.confirm(`清空 ${records.length} 条下载记录？\n\n只删记录，已经下载的文件不会被删掉。`))
+      return;
+    try {
+      for (const r of records) await window.records.remove("material", r.id);
+      setActiveRecordId(null);
+      await refreshRecords();
+    } catch (e: any) {
+      setError(e?.message || String(e));
     }
   }
 
@@ -151,12 +239,70 @@ export default function MaterialView({ nav, onRequestTranscribe }: MaterialViewP
     setError(null);
     setSavedPath(null);
     setProgress(null);
+    setActiveRecordId(null);
+  }
+
+  /**
+   * 左栏「＋ 新建」：清空右边回到输入态，光标放进输入框，直接粘链接。
+   * 只动当前这张卡，已有记录一条不碰（清记录是旁边那个「清空记录」）。
+   */
+  function startFresh() {
+    handleClear();
+    requestAnimationFrame(() => pasteRef.current?.focus());
   }
 
   const platform = meta ? PLATFORM_LABELS[meta.platform] : null;
 
+  /** 左栏「记录」列表：一条 = 一次下好的素材，点开回到那张卡 */
+  const recordList = (
+    <div className="mat-records">
+      <div className="split-list-head">
+        <span className="panel-title">记录</span>
+        <div className="mat-head-actions">
+          <ListAddButton
+            onClick={startFresh}
+            disabled={parsing || downloading}
+            title="清空右边，贴一条新链接（不动已有记录）"
+          />
+          {records.length > 0 && (
+            <button
+              type="button"
+              className="mat-clear"
+              onClick={() => void clearRecords()}
+              title="清空记录（已下载的文件不会被删）"
+            >
+              清空
+            </button>
+          )}
+        </div>
+      </div>
+      {records.length > 0 ? (
+        <div className="split-items">
+          {records.map((r) => (
+            <SideRow
+              key={r.id}
+              title={r.title}
+              active={r.id === activeRecordId}
+              meta={<span>{r.subtitle}</span>}
+              done={!!r.outputPath}
+              doneLabel="已下载"
+              time={formatListTime(r.updatedAt)}
+              onOpen={() => void openRecord(r.id)}
+              onDelete={() => void removeRecord(r.id, r.title)}
+              deleteLabel={`删除记录 ${r.title}`}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="split-empty">
+          还没有记录。粘贴链接解析一次，下好的素材会自动记在这里；点一条就能回到那张卡。
+        </div>
+      )}
+    </div>
+  );
+
   return (
-    <NavPage nav={nav}>
+    <NavPage nav={nav} list={recordList}>
       <div className="view">
       <h2>素材捕手</h2>
       <p className="subtitle">
@@ -165,6 +311,7 @@ export default function MaterialView({ nav, onRequestTranscribe }: MaterialViewP
 
       <textarea
         className="paste"
+        ref={pasteRef}
         placeholder="粘贴分享链接，一键解析媒体资源"
         value={text}
         onChange={(e) => handleTextChange(e.target.value)}

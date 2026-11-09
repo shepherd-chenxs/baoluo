@@ -14,7 +14,7 @@ import type {
 import type { WorkRecordSummary } from "../../shared/record-types";
 import BeeSelect from "../components/BeeSelect";
 import { useConfirm } from "../components/ConfirmDialog";
-import SideList, { SideRow, formatListTime } from "../components/SideList";
+import SideList, { ListAddButton, SideRow, formatListTime } from "../components/SideList";
 import { usePageActive } from "../components/KeepAlive";
 
 declare global {
@@ -226,14 +226,7 @@ export default function SniffView({ nav, onOpenStory }: SniffViewProps = {}) {
         nav={nav}
         section="历史"
         action={
-          <button
-            type="button"
-            className="secondary small"
-            onClick={startFresh}
-            title="清空当前结果，贴一条新链接"
-          >
-            ＋ 新建
-          </button>
+          <ListAddButton onClick={startFresh} title="清空当前结果，贴一条新链接" />
         }
         hasItems={records.length > 0}
         empty={<>还没有记录。右边贴一条爆款链接，拆完就会自动存进这里。</>}

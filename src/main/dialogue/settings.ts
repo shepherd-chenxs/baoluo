@@ -23,6 +23,8 @@ import {
   DEFAULT_SUBTITLE,
   DEFAULT_VOICE_NARRATOR,
 } from "../../shared/settings-defaults";
+import { ALL_PLUGIN_KEYS, isPluginKey } from "../../shared/plugins";
+import { normalizePrefs, type RuntimeId, type RuntimePrefs } from "../../shared/runtime-types";
 
 const DEFAULT_SETTINGS: DialogueSettings = {
   ...DEFAULT_AI,
@@ -168,6 +170,22 @@ export function isAutoSubmitImageEnabled(): boolean {
   return true;
 }
 
+/**
+ * 运行时偏好表（每个运行时各一份模型/权限）：只留认得的运行时 + 合法字段。
+ * 手改配置文件写坏了也不至于让对话区崩掉——认不出的值一律回到默认。
+ */
+function normalizeRuntimePrefs(
+  raw: Partial<Record<string, Partial<RuntimePrefs>>> | undefined
+): Partial<Record<RuntimeId, RuntimePrefs>> | null {
+  if (!raw || typeof raw !== "object") return null;
+  const out: Partial<Record<RuntimeId, RuntimePrefs>> = {};
+  for (const id of ["codex", "claude", "gemini"] as RuntimeId[]) {
+    const one = raw[id];
+    if (one && typeof one === "object") out[id] = normalizePrefs(one);
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 export function updateAppSettings(patch: Partial<AppSettings>): AppSettings {
   if (!cached) cached = loadFile();
   const nextApp: Record<string, unknown> = { ...(cached.app ?? {}) };
@@ -242,12 +260,46 @@ export function updateAppSettings(patch: Partial<AppSettings>): AppSettings {
     if (Object.keys(next).length) nextApp.modelscopeImage = next;
     else delete nextApp.modelscopeImage;
   }
+  /*
+   * 集成运行时（设置 → 运行时）：**只存一个 id**，应用新的就覆盖旧的。
+   * 传空/null = 取消应用 —— 界面只在"已应用的那个已经从本机卸载了"时才给这个口子，
+   * 正常切换不需要先取消（切新的即等于取消旧的）。
+   */
+  if ("runtime" in patch) {
+    const id = patch.runtime?.activeId;
+    if (id === "codex" || id === "claude" || id === "gemini") {
+      // 偏好按运行时分开存；没传就沿用文件里已有的那份（换运行时不该丢上一个人的设置）
+      const prevPrefs = (nextApp.runtime ?? {}) as {
+        prefs?: Partial<Record<RuntimeId, Partial<RuntimePrefs>>>;
+      };
+      const prefs = normalizeRuntimePrefs(patch.runtime?.prefs ?? prevPrefs.prefs);
+      nextApp.runtime = prefs ? { activeId: id, prefs } : { activeId: id };
+    } else {
+      delete nextApp.runtime;
+    }
+  }
   // 豆包生图当日用量（日期 + 张数），跨天归零由 doubao-quota 负责
   if (patch.doubaoGenDaily) {
     nextApp.doubaoGenDaily = {
       date: String(patch.doubaoGenDaily.date ?? "").slice(0, 10),
       count: Math.max(0, Math.floor(Number(patch.doubaoGenDaily.count) || 0)),
     };
+  }
+  /*
+   * 插件安装列表（shared/plugins.ts）：**空数组是合法值**（全卸），不能当 falsy 丢掉。
+   * 只收认得的 key，脏数据直接滤掉；没传这个字段就不动它（= 老配置继续全装）。
+   */
+  if ("installedPlugins" in patch) {
+    const raw = patch.installedPlugins;
+    nextApp.installedPlugins = Array.isArray(raw)
+      ? [...new Set(raw.map(String).filter((k) => isPluginKey(k)))]
+      : [];
+    /*
+     * 同时把「这次写盘时认识的全部 key」记下来（不是界面上传的，所以不放进白名单判断）。
+     * 以后版本新增插件 key 时，它不在这份名单里 → 读配置时会被当作新插件自动装上；
+     * 而用户卸掉的 key 早就在名单中，不会被装回来。
+     */
+    nextApp.knownPlugins = [...ALL_PLUGIN_KEYS];
   }
   cached.app = nextApp;
   persist(cached);

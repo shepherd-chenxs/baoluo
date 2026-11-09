@@ -187,7 +187,7 @@ export interface TranscribeOptions {
   /** 取消信号：中止时停止下载/抽音频/识别 */
   signal?: AbortSignal;
   /**
-   * 进度回调。给「不需要把进度发到某个渲染进程」的调用方用（如变声器：
+   * 进度回调。给「不需要把进度发到某个渲染进程」的调用方用（如命令行脚本：
    * 它有自己的进度通道，不希望转写进度串到语音识别页的 UI 上）。
    */
   onProgress?: (p: TranscribeProgressEvent) => void;

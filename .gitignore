@@ -46,6 +46,8 @@ build/icon-preview.png
 resources/whisper/
 # 便携版 Python 运行时 + 预装依赖（由 postinstall 的 setup-python.cjs 生成，不入库）
 resources/python/
+# setup-python.cjs 下载的 CPython 压缩包（生成物缓存，不入库）
+resources/*.tar.gz
 # 预编译依赖轮子（由 setup-python.cjs 生成，随安装包分发，不入库）
 resources/wheels/
 # Local environment / setup files
@@ -64,6 +66,7 @@ settings.txt
 docs/项目文档-by班底/
 # 内部工具产物与工作台配置
 .bandi/
+.zcode/
 .zcodeignore
 # 本机工作区数据（AI 助手记忆、缓存，属本地）
 .workbuddy/

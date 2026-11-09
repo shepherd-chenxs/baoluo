@@ -1,9 +1,9 @@
 /**
- * AI 分镜生成（OpenAI 兼容协议，任意服务商）：给定热点/主题 → 标题 + 钩子 + 统一风格 + 镜头列表。
- * 复用的 AI 连接配置来自「设置 → AI 服务」（settings.json 的 dialogue 分区）。
+ * AI 分镜生成：给定热点/主题 → 标题 + 钩子 + 统一风格 + 镜头列表。
+ *
+ * 模型走 `llm`（应用了运行时就用 CLI，否则退回「设置 → AI 服务」），
+ * 这一层只负责提示词、JSON 收口和失败重试。
  */
-import { net } from "electron";
-import { withNetworkRetry } from "../net-retry";
 import { parseAiJson } from "../ai-json";
 import type {
   AiStoryboardDraft,
@@ -11,12 +11,19 @@ import type {
 } from "../../shared/storyboard-types";
 import type { VideoResolution } from "../../shared/dialogue-types";
 import { VIRAL_TRIGGERS } from "../../shared/viral-triggers";
-import * as settings from "../dialogue/settings";
+import { llmComplete, llmRoute } from "../llm";
 
 export type AiPhase = "thinking" | "writing" | "done" | "error";
 export type OnAiPhase = (phase: AiPhase, message: string) => void;
 
-const REQUEST_TIMEOUT_MS = 120_000;
+/** 运行时慢起来是真慢（排队 + 长 JSON），给足 4 分钟 */
+const REQUEST_TIMEOUT_MS = 240_000;
+
+/** 报错/提示里怎么说"是谁在写" */
+function who(): string {
+  const route = llmRoute();
+  return route.source === "runtime" ? route.label : "AI";
+}
 
 function aspectText(resolution?: VideoResolution): string {
   return resolution === "landscape" ? "横屏 16:9" : "竖屏 9:16";
@@ -113,7 +120,7 @@ ${methodLine}
 目标时长：${duration} 秒，请据此安排镜头数。`;
 }
 
-/** 发送一次 chat 请求并返回原始文本 */
+/** 发送一次生成请求并返回原始文本（运行时 / AI 服务由 llm 决定） */
 async function chatOnce(
   userPrompt: string,
   focus: "full" | "shot",
@@ -121,85 +128,27 @@ async function chatOnce(
   resolution?: VideoResolution,
   signal?: AbortSignal
 ): Promise<string> {
-  const s = settings.getSettings();
-  if (!s.apiKey?.trim()) {
-    throw new Error("还没有配置 AI 服务（API Key），请先到「设置 → AI 服务」填写。");
-  }
-  const base = (s.baseUrl || "https://api.deepseek.com/v1").replace(/\/+$/, "");
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  const onExternalAbort = () => controller.abort();
-  signal?.addEventListener("abort", onExternalAbort, { once: true });
-  try {
-    let system = buildSystemPrompt(resolution);
-    let user = userPrompt;
-    if (focus === "shot") {
-      system = `你是短视频分镜提示词优化师。只输出 JSON：{"imagePrompt":"..."}，不要 Markdown。
+  let system = buildSystemPrompt(resolution);
+  let user = userPrompt;
+  if (focus === "shot") {
+    system = `你是短视频分镜提示词优化师。只输出 JSON：{"imagePrompt":"..."}，不要 Markdown。
 imagePrompt 用中文描述一个静态画面的主体/场景/构图/光线，并保证${aspectText(resolution)}、无文字无水印、统一风格。`;
-      user = `当前方案：
+    user = `当前方案：
 标题：${context?.split("\n")[0] ?? ""}
 统一风格：${context?.split("\n")[1] ?? ""}
 需要重新出图的镜头旁白：${context?.split("\n")[2] ?? ""}
 请围绕这段旁白生成一条全新的画面提示词。`;
-    }
-    // 瞬时网络错误（睡眠唤醒/切换网络）自动重试一次；controller.signal 保证超时与取消仍然优先
-    const res = await withNetworkRetry(signal, () =>
-      net.fetch(base + "/chat/completions", {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${s.apiKey.trim()}`,
-        },
-        body: JSON.stringify({
-          model: s.model || "deepseek-chat",
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-          ],
-          temperature: 0.8,
-          response_format: { type: "json_object" },
-          max_tokens: 4096,
-          stream: false,
-        }),
-      })
-    );
-    if (!res.ok) {
-      let detail = "";
-      try {
-        const err = (await res.json()) as { error?: { message?: string } };
-        detail = err?.error?.message ?? "";
-      } catch {
-        /* noop */
-      }
-      if (res.status === 401) {
-        throw new Error("AI 服务鉴权失败（Key 无效，或这个服务商不需要 Key），请到「设置 → AI 服务」检查。");
-      }
-      throw new Error(`AI 服务请求失败（HTTP ${res.status}）${detail ? `：${detail}` : ""}`);
-    }
-    const data = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string | null; reasoning_content?: string | null } }>;
-    };
-    // 推理模型（GLM / R1 类）的答案可能全在 reasoning_content、content 为 null：此时才用思考区兜底。
-    // **不能无脑拼接**：思考文本里的引号/大括号会把 content 里的干净 JSON 弄脏（实测踩过）。
-    const raw = data.choices?.[0]?.message ?? {};
-    const content = String(raw.content ?? "").trim() || String(raw.reasoning_content ?? "").trim();
-    if (!content) throw new Error("AI 返回为空，请稍后重试。");
-    return content;
-  } catch (e: any) {
-    /*
-     * 顺序必须是「先看是不是用户取消」：内部超时和外部 abort 都会让 fetch 抛 AbortError，
-     * 先判 AbortError 的话，用户点取消也会被翻成"AI 生成超时"。
-     */
-    if (signal?.aborted) throw new Error("已取消");
-    if (e?.name === "AbortError" || e?.message?.includes("aborted")) {
-      throw new Error("AI 生成超时，请重试或检查网络。");
-    }
-    throw e;
-  } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener("abort", onExternalAbort);
   }
+  return llmComplete({
+    system,
+    user,
+    json: true,
+    temperature: 0.8,
+    maxTokens: 4096,
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    signal,
+    label: focus === "shot" ? "重出画面提示词" : "写分镜",
+  });
 }
 
 function requestContext(boardTitle: string, style: string, caption: string): string {
@@ -211,9 +160,9 @@ export async function generateAiDraft(
   onPhase?: OnAiPhase,
   signal?: AbortSignal
 ): Promise<AiStoryboardDraft> {
-  onPhase?.("thinking", "AI 正在理解热点与选题方向…");
+  onPhase?.("thinking", `${who()} 正在理解热点与选题方向…`);
   const userPrompt = buildUserPrompt(req);
-  onPhase?.("writing", "正在撰写旁白与画面提示词…");
+  onPhase?.("writing", `${who()} 正在撰写旁白与画面提示词…`);
 
   let lastParseError: Error | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {

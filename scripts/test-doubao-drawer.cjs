@@ -1,14 +1,16 @@
 /**
- * 内嵌豆包抽屉测试（必须在 Electron 下跑）。
+ * 豆包独立窗口测试（必须在 Electron 下跑）。
  *
  *   npm run test:doubao
  *
  * 不连真实豆包：起一个本地 HTTP 服务当替身页面，页面里每 300ms 打一次请求，
- * 于是「关掉抽屉后不再联网」能直接数请求数验证，不受外网和豆包改版影响。
+ * 于是「关掉窗口后不再联网」能直接数请求数验证，不受外网和豆包改版影响。
  *
- * 覆盖：懒加载、打开后可见、关闭后不再联网、关闭只隐藏不销毁（重开秒回）、
- *      重开能恢复、占位盒归零即隐藏、改尺寸跟随、站外跳转不开新窗口、
- *      非 http 协议不导航、登录态分区落在数据目录里、窗口关闭时清理视图。
+ * 覆盖：懒加载、打开后窗口可见、关闭后不再联网、关闭只隐藏不销毁（重开秒回）、
+ *      重开能恢复、用户点豆包窗口自己的 ✕ 也只是隐藏、站外跳转不开新窗口、
+ *      非 http 协议不导航、登录态分区落在数据目录里、主窗口关闭时清理豆包窗口。
+ * （v1.0.0 时代还有「占位盒归零即隐藏 / 改尺寸跟随」两条——豆包换成独立窗口后
+ *   位置由用户自己拖，setDoubaoBounds 只保留为兼容 no-op，这里验证它不崩即可。）
  */
 const http = require("node:http");
 const path = require("node:path");
@@ -64,7 +66,7 @@ function check(ok, label, extra = "") {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** 替身页面：每 300ms 打一次 /tick，用来数「关掉抽屉后还有没有在联网」 */
+/** 替身页面：每 300ms 打一次 /tick，用来数「关掉窗口后还有没有在联网」 */
 const PAGE = [
   '<!doctype html><html><head><meta charset="utf-8"><title>替身豆包</title></head>',
   "<body><h1>替身豆包</h1>",
@@ -93,10 +95,12 @@ async function waitFor(fn, timeoutMs = 15000, stepMs = 200) {
   return null;
 }
 
-/** 从窗口里找挂在 contentView 上的豆包视图 */
-function findView(win) {
-  return win.contentView.children.find((v) => v.webContents) || null;
+/** 豆包独立窗口：主窗口（win）之外的那个 BrowserWindow */
+function findPanel() {
+  return BrowserWindow.getAllWindows().find((w) => w !== win && !w.isDestroyed()) || null;
 }
+
+let win;
 
 (async () => {
   await app.whenReady();
@@ -105,39 +109,38 @@ function findView(win) {
   process.env.BAOLUO_DOUBAO_URL = `http://127.0.0.1:${server.address().port}/`;
 
   const doubao = require(path.join(ROOT, "dist", "main", "doubao.js"));
-  const win = new BrowserWindow({ width: 1200, height: 800, show: false });
+  win = new BrowserWindow({ width: 1200, height: 800, show: false });
 
   // --- 1) 懒加载 ---
-  check(doubao.getDoubaoState().attached === false, "未打开时视图未创建（懒加载）");
+  check(doubao.getDoubaoState().attached === false, "未打开时窗口未创建（懒加载）");
   check(requests === 0, "未打开时不发起任何请求", `requests=${requests}`);
 
   // --- 2) 打开 ---
   doubao.setDoubaoVisible(win, true);
-  doubao.setDoubaoBounds({ x: 0, y: 46, width: 700, height: 700 });
   const ready = await waitFor(() =>
     doubao.getDoubaoState().status === "ready" ? doubao.getDoubaoState() : null
   );
   check(!!ready, "打开后页面加载完成（status=ready）", `status=${doubao.getDoubaoState().status}`);
-  check(doubao.getDoubaoState().visible === true, "加载完成后视图可见");
+  check(doubao.getDoubaoState().visible === true, "加载完成后窗口可见");
+  const panel = findPanel();
+  check(!!panel, "豆包窗口是独立的 BrowserWindow（不在主窗口 DOM 里）");
+  check(!!panel && panel.isVisible(), "独立窗口对用户可见");
   // 替身页面每 300ms 才打一次 /tick，等两拍再数
   await sleep(1000);
   check(requests > 0, "打开后有网络请求", `requests=${requests}`);
 
-  // --- 3) 占位盒归零 = 隐藏（页面被切走的情形），但不销毁 ---
-  doubao.setDoubaoBounds({ x: 0, y: 0, width: 0, height: 0 });
-  await sleep(400);
-  check(doubao.getDoubaoState().visible === false, "占位盒归零后视图隐藏");
-  check(doubao.getDoubaoState().attached === true, "占位盒归零只隐藏、不销毁（切回来不用重载）");
+  // --- 2.5) setDoubaoBounds 只是兼容 no-op：调用不崩、状态不变 ---
   doubao.setDoubaoBounds({ x: 0, y: 46, width: 700, height: 700 });
-  const restored = await waitFor(() =>
-    doubao.getDoubaoState().visible ? doubao.getDoubaoState() : null
+  await sleep(200);
+  check(
+    doubao.getDoubaoState().visible === true && !!findPanel(),
+    "setDoubaoBounds 兼容入口 no-op（不崩、不改变窗口状态）"
   );
-  check(!!restored, "占位盒恢复后视图重新显示");
 
-  // --- 4) 站外跳转不开新窗口 ---
-  const view = findView(win);
+  // --- 3) 站外跳转不开新窗口 ---
+  const wc = panel.webContents;
   const winsBefore = BrowserWindow.getAllWindows().length;
-  await view.webContents.executeJavaScript("window.open('https://example.com','_blank'); 1;", true);
+  await wc.executeJavaScript("window.open('https://example.com','_blank'); 1;", true);
   await sleep(1500);
   check(
     BrowserWindow.getAllWindows().length === winsBefore,
@@ -145,79 +148,66 @@ function findView(win) {
     `before=${winsBefore} after=${BrowserWindow.getAllWindows().length}`
   );
 
-  // --- 5) 非 http(s) 协议不导航 ---
-  await view.webContents
-    .executeJavaScript("location.href='doubao://hack'; 1;", true)
-    .catch(() => {});
+  // --- 4) 非 http(s) 协议不导航 ---
+  await wc.executeJavaScript("location.href='doubao://hack'; 1;", true).catch(() => {});
   await sleep(1000);
-  const after = view.webContents.getURL();
+  const after = wc.getURL();
   check(/^https?:\/\//i.test(after), "非 http(s) 协议被拦下，仍停在 http 页面", `after=${after}`);
 
-  // --- 6) 登录态分区落在数据目录里 ---
+  // --- 5) 登录态分区落在数据目录里 ---
   const partDir = path.join(SANDBOX, "Partitions", "doubao");
   check(fs.existsSync(partDir), "分区目录落在数据目录下（可随迁移一起走）", partDir);
 
-  // --- 7) 关闭 = 隐藏 + 冻结：视图保留（重开秒回），且不再联网 ---
-  const viewBeforeClose = findView(win);
+  // --- 6) 用户点豆包窗口自己的 ✕：只隐藏、不销毁 ---
+  const panelBeforeClose = findPanel();
+  panelBeforeClose.close();
+  await sleep(400);
+  check(doubao.getDoubaoState().visible === false, "点窗口 ✕ 后状态为不可见");
+  check(doubao.getDoubaoState().attached === true, "点窗口 ✕ 只隐藏、不销毁（close 被拦成 hide）");
+  check(findPanel() === panelBeforeClose, "窗口实例还在（没有真的关掉）");
+
+  // --- 7) API 关闭 = 隐藏 + 冻结：页面保留（重开秒回），且不再联网 ---
+  doubao.setDoubaoVisible(win, true);
+  await waitFor(() => doubao.getDoubaoState().visible);
   doubao.setDoubaoVisible(win, false);
-  check(doubao.getDoubaoState().visible === false, "关闭后视图不可见");
+  check(doubao.getDoubaoState().visible === false, "关闭后窗口不可见");
   check(doubao.getDoubaoState().attached === true, "关闭只隐藏、不销毁（重开不用重载）");
-  check(findView(win) === viewBeforeClose, "关闭后窗口上挂的还是同一个视图实例");
+  check(findPanel() === panelBeforeClose, "关闭后还是同一个窗口实例");
   await sleep(1200); // 让在途请求收尾
   const frozenBase = requests;
   await sleep(4000);
   check(
     requests === frozenBase,
-    "关闭后 4 秒内不再发起新请求",
+    "关闭后 4 秒内不再发起新请求（冻结生效）",
     `base=${frozenBase} now=${requests}`
   );
 
-  // --- 8) 重新打开：视图复用，不需要重新加载 ---
+  // --- 8) 重新打开：窗口复用，不需要重新加载 ---
   const t0 = Date.now();
   doubao.setDoubaoVisible(win, true);
-  doubao.setDoubaoBounds({ x: 0, y: 46, width: 700, height: 700 });
   const ready2 = await waitFor(() =>
     doubao.getDoubaoState().status === "ready" && doubao.getDoubaoState().visible
       ? doubao.getDoubaoState()
       : null
   );
-  check(!!ready2, "重新打开后立刻可见（复用视图，不重新加载）");
+  check(!!ready2, "重新打开后立刻可见（复用窗口，不重新加载）");
   check(
     Date.now() - t0 < 500,
     "重开耗时 < 500ms（回归：曾因关闭即销毁而要 3 秒）",
     `${Date.now() - t0}ms`
   );
-  check(findView(win) === viewBeforeClose, "重开后仍是同一个视图实例");
+  check(findPanel() === panelBeforeClose, "重开后仍是同一个窗口实例");
 
-  // --- 8.5) 窗口改大小：视图跟着走（回归：视图位置曾不跟随窗口尺寸） ---
-  const view2 = findView(win);
-  doubao.setDoubaoBounds({ x: 100, y: 46, width: 500, height: 400 });
-  await sleep(300);
-  check(
-    JSON.stringify(view2.getBounds()) === JSON.stringify({ x: 100, y: 46, width: 500, height: 400 }),
-    "改尺寸后视图 bounds 跟着变",
-    JSON.stringify(view2.getBounds())
-  );
-  // 窗口整体移动（只改位置不改大小）时，渲染层算出来的视口坐标不变，视图不应偏移
-  doubao.setDoubaoBounds({ x: 100, y: 46, width: 500, height: 400 });
-  await sleep(200);
-  check(
-    JSON.stringify(view2.getBounds()) === JSON.stringify({ x: 100, y: 46, width: 500, height: 400 }),
-    "重复同步同样的 bounds 保持稳定（不会累积漂移）",
-    JSON.stringify(view2.getBounds())
-  );
-
-  // --- 9) 窗口关闭时清理视图 ---
+  // --- 9) 主窗口关闭时清理豆包窗口 ---
   doubao.disposeDoubao(win);
-  check(doubao.getDoubaoState().attached === false, "窗口关闭后视图已销毁");
-  check(findView(win) === null, "窗口上不再挂着豆包视图");
+  check(doubao.getDoubaoState().attached === false, "主窗口关闭后豆包窗口已销毁");
+  check(findPanel() === null, "豆包窗口不再存在");
 
-  // --- 9.5) 迁移前释放：视图销毁、且再次销毁不报错 ---
+  // --- 9.5) 迁移前释放：窗口销毁、且再次销毁不报错 ---
   doubao.setDoubaoVisible(win, true);
-  doubao.setDoubaoBounds({ x: 0, y: 46, width: 700, height: 700 });
   await waitFor(() => doubao.getDoubaoState().attached);
   doubao.releaseDoubaoBeforeMigration();
-  check(doubao.getDoubaoState().attached === false, "迁移前释放：视图已销毁（不再占用分区文件）");
+  check(doubao.getDoubaoState().attached === false, "迁移前释放：窗口已销毁（不再占用分区文件）");
   doubao.releaseDoubaoBeforeMigration(); // 重复调用不应抛错
   check(true, "迁移前释放可重复调用（幂等，不抛错）");
 
@@ -244,6 +234,6 @@ function findView(win) {
   console.log(failures ? `\n${failures} 项未通过` : "\n第 1 趟全部通过");
   app.exit(failures ? 1 : 0);
 })().catch((e) => {
-  console.error("FAIL  内嵌豆包测试抛错 —", e?.stack || e?.message || e);
+  console.error("FAIL  豆包独立窗口测试抛错 —", e?.stack || e?.message || e);
   app.exit(1);
 });
