@@ -817,6 +817,16 @@ button:disabled {
   font-weight: 700;
   letter-spacing: 0.2px;
 }
+/* 品牌名后的版本号：小一号、弱化，别抢标题 */
+.brand-version {
+  margin-left: 2px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  color: #8e8e93;
+  letter-spacing: 0;
+  user-select: none;
+}
 .content {
   flex: 1;
   min-width: 0;
@@ -4359,9 +4369,7 @@ select option {
   background: rgba(0, 0, 0, 0.06);
   color: #1d1d1f;
 }
-/* 任务栏切换按钮：方形小图标按钮，平时不显眼 */
-/* 工作台页：品牌图标本身就是任务栏开关（ZCode 式）。
-   平时是宝螺 logo，悬浮盖上一层白底 + 收起图标，点一下切换左栏 */
+/* 顶栏品牌位：纯 logo，不再兼任任务栏开关（不可点、无悬浮态） */
 .topnav-brand-toggle {
   position: relative;
   width: 28px;
@@ -4373,58 +4381,31 @@ select option {
   border: none;
   border-radius: 8px;
   background: transparent;
-  cursor: pointer;
-  flex-shrink: 0;
-  /* 顶条是拖拽区，按钮要单独解除 */
-  -webkit-app-region: no-drag;
-  transition: background 0.15s ease;
-}
-.topnav-brand-toggle:hover {
-  background: rgba(0, 0, 0, 0.05);
-}
-/* 非工作台页：图标只是 logo——不用原生 disabled（浏览器会给禁用按钮套降级样式把图标弄灰），
-   改用静态类：外观与普通 logo 完全一致，只是不可点、无悬浮态 */
-.topnav-brand-toggle.is-static {
   cursor: default;
-}
-.topnav-brand-toggle.is-static:hover {
-  background: transparent;
-}
-.topnav-brand-toggle.is-static .topnav-brand-hover {
-  display: none;
+  flex-shrink: 0;
+  /* 顶条是拖拽区，这里保持可拖拽即可，无需解除 */
 }
 .topnav-brand-logo {
   width: 22px;
   height: 22px;
   object-fit: contain;
 }
-.topnav-brand-hover {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  background: #fff;
-  color: #8e8e93;
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
-.topnav-brand-toggle:hover .topnav-brand-hover {
-  opacity: 1;
-  color: #1d1d1f;
-}
 /* 顶栏一级导航：工作台 / 设置。选中态用与左栏一致的浅灰胶囊 */
 .topnav-tabs {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  /* 撑满顶栏高度：激活下划线要贴到顶栏下缘（Chrome/VS Code 式） */
+  align-self: stretch;
+  align-items: stretch;
+  gap: 4px;
   margin-left: 22px;
 }
 .topnav-tab {
-  padding: 5px 14px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
   border: none;
-  border-radius: 8px;
+  border-radius: 0;
   background: transparent;
   color: #6b6b70;
   font-size: 13px;
@@ -4433,15 +4414,30 @@ select option {
   /* 顶条是拖拽区，按钮要单独解除 */
   -webkit-app-region: no-drag;
   transition: background 0.15s ease, color 0.15s ease;
+  /* 全局 button 的按压缩放在导航标签上很怪（整条高度都在缩） */
 }
-.topnav-tab:hover {
+.topnav-tab:active {
+  transform: none;
+}
+.topnav-tab:hover:not(.active) {
   background: rgba(0, 0, 0, 0.04);
   color: #1d1d1f;
 }
 .topnav-tab.active {
-  background: rgba(0, 0, 0, 0.06);
+  /* 激活态不铺灰底（那是"像块阴影"的元凶），只用文字对比 + 底部指示线 */
+  background: transparent;
   color: #1d1d1f;
-  font-weight: 500;
+  font-weight: 600;
+}
+.topnav-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 0;
+  height: 2.5px;
+  border-radius: 2px 2px 0 0;
+  background: #007aff;
 }
 .ws-list-items {
   /* 与 .split-items 同款：列表自己滚，条目再多也不把标题和底部入口顶走 */

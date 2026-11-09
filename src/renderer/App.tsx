@@ -298,13 +298,11 @@ export default function App() {
    * 默认收起——空工作台没任务可看，别占掉半屏；建卡/点任务时会自动请求展开（WorkspaceView）。 */
   const [wsPanelOpen, setWsPanelOpen] = useState(false);
   /**
-   * 工作台左栏任务列表的收起/展开：开关在顶部条左端。
-   * wsListAuto = 窗口太窄（<1100px，对话区不够最小宽）时的自动收起，宽回 1160+ 自动恢复；
-   * 跟手动开关分开记，手动点了就清掉自动态，直到下次 resize 再介入。
+   * 工作台左栏任务列表：不做手动收起开关，只剩窗口太窄
+   * （<1100px，对话区不够最小宽）时的自动收起，宽回 1160+ 自动恢复。
    */
-  const [wsListOpen, setWsListOpen] = useState(true);
   const [wsListAuto, setWsListAuto] = useState(false);
-  const wsListShown = wsListOpen && !wsListAuto;
+  const wsListShown = !wsListAuto;
   useEffect(() => {
     const check = () => {
       if (window.innerWidth < 1100) setWsListAuto(true);
@@ -322,29 +320,17 @@ export default function App() {
 
   return (
     <div className="app">
-      {/* 顶部导航条：品牌（工作台页兼任务栏开关）+「工作台 / 设置」两个一级入口，
+      {/* 顶部导航条：品牌 +「工作台 / 设置」两个一级入口，
         右端留工作台操作区开关。插件页没有左栏，回工作台就点顶栏「工作台」。 */}
     <header className="topnav topnav-slim">
-      <button
-        type="button"
-        className={`topnav-brand-toggle${tab === "workspace" ? "" : " is-static"}`}
-        title={tab === "workspace" ? (wsListShown ? "收起任务栏" : "展开任务栏") : undefined}
-        aria-label={tab === "workspace" ? (wsListShown ? "收起任务栏" : "展开任务栏") : undefined}
-        onClick={() => {
-          if (tab !== "workspace") return;
-          setWsListAuto(false);
-          setWsListOpen((v) => !v);
-        }}
-      >
+      <span className="topnav-brand-toggle is-static">
         <BrandLogo className="topnav-brand-logo" />
-        <span className="topnav-brand-hover" aria-hidden="true">
-            <svg width="15" height="15" viewBox="0 0 16 16">
-              <rect x="1.5" y="2.5" width="13" height="11" rx="2" fill="none" stroke="currentColor" strokeWidth="1.4" />
-              <line x1="6" y1="2.5" x2="6" y2="13.5" stroke="currentColor" strokeWidth="1.4" />
-            </svg>
-          </span>
-        </button>
+      </span>
         <span className="brand-name">宝螺</span>
+        {/* 版本号：构建时从 package.json 注入，跟主进程窗口标题/关于页同源 */}
+        <span className="brand-version" title={`当前版本 v${__APP_VERSION__}`}>
+          v{__APP_VERSION__}
+        </span>
         {/* 一级导航：工作台 / 设置（设置含关于，active 一起亮） */}
         <nav className="topnav-tabs">
           <button
