@@ -10,6 +10,9 @@ files:
 # ffmpeg-static 里的 ffmpeg.exe 必须解出 asar 才能执行
 asarUnpack:
   - node_modules/ffmpeg-static/**
+  # headless 入口（宝螺的 MCP 服务，bandi 连接器 spawn 用的就是它）：
+  # spawn 进程没有 Electron 的 asar 补丁，必须落在真实文件上
+  - dist/headless/**
 # whisper.cpp 二进制 + DLL 打包到 resources/whisper/
 extraResources:
   - from: build/icon.ico

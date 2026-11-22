@@ -20,13 +20,20 @@ export interface RunSniffInput {
   signal?: AbortSignal;
   webContents?: WebContents;
   requestId?: string;
+  /**
+   * 阶段回调（2026-11-22）：给「没有渲染进程」的调用方（headless 入口）用 ——
+   * 与 webContents.send 同源同频，谁在收走谁的路。
+   */
+  onStage?: (stage: string, message: string) => void;
 }
 
 function send(
   webContents: WebContents | undefined,
   requestId: string | undefined,
-  p: Omit<SniffProgress, "requestId">
+  p: Omit<SniffProgress, "requestId">,
+  onStage?: (stage: string, message: string) => void
 ) {
+  if (onStage) onStage(p.stage, p.message);
   if (webContents && !webContents.isDestroyed()) {
     webContents.send("sniff:progress", { requestId, ...p });
   }
@@ -36,14 +43,15 @@ export async function runSniff(input: RunSniffInput): Promise<SniffRecord> {
   // abort 检查点：解析本身很快，从这里开始的长活都要能停
   const signal = input.signal;
   const requestId = input.requestId;
-  send(input.webContents, requestId, { stage: "parse", message: "正在解析视频链接…" });
+  const onStage = input.onStage;
+  send(input.webContents, requestId, { stage: "parse", message: "正在解析视频链接…" }, onStage);
   const meta = await parseMedia(input.link.trim());
 
   // 轻量工具：全程只用临时目录，视频等中间产物随用随删。
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "bee-sniff-"));
   const videoPath = path.join(workDir, "source.mp4");
   try {
-    send(input.webContents, requestId, { stage: "download", message: "正在下载视频…" });
+    send(input.webContents, requestId, { stage: "download", message: "正在下载视频…" }, onStage);
     await downloadVideo({
       url: meta.playUrl,
       savePath: videoPath,
@@ -55,7 +63,7 @@ export async function runSniff(input: RunSniffInput): Promise<SniffRecord> {
       durationMs: meta.duration,
     });
 
-    send(input.webContents, requestId, { stage: "transcribe", message: "正在提取口播文案（首次会先准备本地模型）…" });
+    send(input.webContents, requestId, { stage: "transcribe", message: "正在提取口播文案（首次会先准备本地模型）…" }, onStage);
     const transcript = await transcribeVideo({
       videoPath,
       signal,
@@ -64,7 +72,7 @@ export async function runSniff(input: RunSniffInput): Promise<SniffRecord> {
       language: "zh",
     });
 
-    send(input.webContents, requestId, { stage: "analyze", message: "正在拆解爆款方法…" });
+    send(input.webContents, requestId, { stage: "analyze", message: "正在拆解爆款方法…" }, onStage);
     signal?.throwIfAborted();
     const analysis = await analyzeTranscript({
       title: meta.title,
@@ -85,7 +93,7 @@ export async function runSniff(input: RunSniffInput): Promise<SniffRecord> {
       transcript: transcript.text,
       analysis,
     };
-    send(input.webContents, requestId, { stage: "done", message: "拆解完成" });
+    send(input.webContents, requestId, { stage: "done", message: "拆解完成" }, onStage);
     return record;
   } finally {
     // 下载的视频与转写中间产物一律不留，嗅探完即清空

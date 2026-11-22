@@ -20,6 +20,11 @@ export interface DownloadOptions {
   durationMs?: number;
   /** 取消信号：中止时停下载、杀 ffmpeg */
   signal?: AbortSignal;
+  /**
+   * 进度回调（2026-11-22）：给「没有渲染进程」的调用方用（headless 入口 /
+   * 命令行脚本）—— webContents 是往界面推的，这里是在进程内收的。
+   */
+  onProgress?: (p: { stage: "download" | "merge"; received: number; total: number; percent: number }) => void;
 }
 
 const PLATFORM_REFERERS: Record<MediaPlatform, string> = {
@@ -36,7 +41,7 @@ const PLATFORM_REFERERS: Record<MediaPlatform, string> = {
  * ReadableStream reader 分片写入磁盘并回推进度。
  */
 export async function downloadVideo(opts: DownloadOptions): Promise<void> {
-  const { url, savePath, webContents, requestId, platform, audioUrl, signal } = opts;
+  const { url, savePath, webContents, requestId, platform, audioUrl, signal, onProgress } = opts;
   ensureDir(path.dirname(savePath));
 
   const referer = PLATFORM_REFERERS[platform ?? "generic"];
@@ -51,9 +56,9 @@ export async function downloadVideo(opts: DownloadOptions): Promise<void> {
     const audioTmp = savePath + ".audio.tmp";
     try {
       await downloadStream(url, videoTmp, headers, signal, (p) => {
-        sendProgress(webContents, requestId, p.received, p.total);
+        sendProgress(webContents, requestId, onProgress, p.received, p.total);
       });
-      sendStage(webContents, requestId, "merge");
+      sendStage(webContents, requestId, onProgress);
       await downloadStream(audioUrl, audioTmp, headers, signal);
       const res = await runFfmpeg([
         "-y",
@@ -79,12 +84,13 @@ export async function downloadVideo(opts: DownloadOptions): Promise<void> {
       requestId,
       durationMs: opts.durationMs ?? 0,
       signal,
+      onProgress: opts.onProgress,
     });
     return;
   }
 
   await downloadStream(url, savePath, headers, signal, (p) => {
-    sendProgress(webContents, requestId, p.received, p.total);
+    sendProgress(webContents, requestId, onProgress, p.received, p.total);
   });
 }
 
@@ -97,6 +103,7 @@ async function downloadHls(
     requestId?: string;
     durationMs: number;
     signal?: AbortSignal;
+    onProgress?: DownloadOptions["onProgress"];
   }
 ): Promise<void> {
   const headerStr = Object.entries(headers)
@@ -118,31 +125,35 @@ async function downloadHls(
         opts.durationMs > 0
           ? Math.min(100, Math.round((time * 1000) / opts.durationMs * 100))
           : 0;
-      sendProgress(opts.webContents, opts.requestId, 0, 0, pct);
+      sendProgress(opts.webContents, opts.requestId, opts.onProgress, 0, 0, pct);
     },
   });
   if (res.code !== 0) {
     throw new Error(`HLS 下载失败：${res.stderr.slice(-500)}`);
   }
-  sendProgress(opts.webContents, opts.requestId, 0, 0, 100);
+  sendProgress(opts.webContents, opts.requestId, opts.onProgress, 0, 0, 100);
 }
 
 function sendProgress(
   webContents: WebContents | undefined,
   requestId: string | undefined,
+  onProgress: DownloadOptions["onProgress"] | undefined,
   received: number,
   total: number,
   percentOverride?: number
 ) {
+  const percent =
+    percentOverride ?? (total > 0 ? Math.min(100, (received / total) * 100) : 0);
+  if (onProgress) {
+    onProgress({ stage: "download", received, total, percent });
+  }
   if (webContents && !webContents.isDestroyed()) {
     webContents.send("download:progress", {
       requestId,
       stage: "download",
       received,
       total,
-      percent:
-        percentOverride ??
-        (total > 0 ? Math.min(100, (received / total) * 100) : 0),
+      percent,
     });
   }
 }
@@ -150,12 +161,15 @@ function sendProgress(
 function sendStage(
   webContents: WebContents | undefined,
   requestId: string | undefined,
-  stage: "merge"
+  onProgress: DownloadOptions["onProgress"] | undefined
 ) {
+  if (onProgress) {
+    onProgress({ stage: "merge", received: 0, total: 0, percent: 100 });
+  }
   if (webContents && !webContents.isDestroyed()) {
     webContents.send("download:progress", {
       requestId,
-      stage,
+      stage: "merge",
       received: 0,
       total: 0,
       percent: 100,

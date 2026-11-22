@@ -57,6 +57,21 @@ UI 是一行细顶栏（和最小化/最大化/关闭同一行）：**工作台*
 
 ---
 
+## headless MCP 服务（给外部 agent 用，v1.1.0 起）
+
+同一份能力层，另一种壳：**无窗口的 MCP 服务**。班底（bandi）这类 agent 平台把它登记成
+连接器后，数字员工就能直接使唤宝螺 —— 下载无水印素材、Whisper 转录、配音（在线音色 +
+本地克隆）、对话视频合成、爆款拆解、分镜提示词、ModelScope 生图。**宝螺窗口开不开都行**，
+服务进程与 GUI 彻底分离；长作业落盘（`userData/mcp/jobs/`），跨会话查得到、取消得掉。
+
+结构：`bridge.cjs`（纯 node，stdio↔HTTP 桥，bandi spawn 它）→ `bundle.cjs --service`
+（完整 Electron 运行时，127.0.0.1:8765/mcp）→ 能力模块；长任务再派 detached worker。
+豆包生图不在此列（登录态 + 离屏窗口是它产品形态的一部分），生图走 ModelScope 引擎。
+
+接入参数、工具表、作业生命周期与已知边界见 [docs/headless-mcp.md](./docs/headless-mcp.md)。
+
+---
+
 ## 开发
 
 ```bash

@@ -28,6 +28,7 @@ import { downloadVideo, safeFileName } from "../downloader";
 import { transcribeVideo } from "../transcribe";
 import { cancelCompose, defaultOutputDir, runCompose } from "../dialogue/compose";
 import { runSniff } from "../sniff/pipeline";
+import { renderSniffReport } from "../sniff/format";
 import { prosodyPercent, TtsEngine } from "../dialogue/tts";
 import { cloneIdFromVoice, findCloneVoice, synthCloneSingle } from "../dialogue/clone-voice";
 import type { SniffRecord } from "../../shared/sniff-types";
@@ -627,30 +628,6 @@ const dialogueConfigTool: AgentToolSpec = {
     return { note: "配好两个角色就往下走" };
   },
 };
-
-/** 爆款拆解报告：摊成纯文本，工作台里直接读，也能拿去当写脚本的输入 */
-function renderSniffReport(rec: SniffRecord): string {
-  const a = rec.analysis;
-  const lines: string[] = [
-    `原片：${rec.source.title}`,
-    `作者 / 平台：${rec.source.author} · ${rec.source.platform}`,
-    `链接：${rec.source.url}`,
-    "",
-    `引爆类型：${a.trigger}`,
-    `开头钩子：${a.hook}`,
-    "",
-    "叙事结构：",
-    ...a.structure.map((s, i) => `  ${i + 1}. ${s}`),
-    "",
-    `可复用方法：${a.reusable}`,
-  ];
-  if (a.commentBait) lines.push("", `互动埋点：${a.commentBait}`);
-  if (a.topics?.length) {
-    lines.push("", "同方法的选题：", ...a.topics.map((t) => `  · ${t}`));
-  }
-  lines.push("", "——— 原片文案 ———", rec.transcript);
-  return lines.join("\n");
-}
 
 /** 爆款嗅探：一条链接 → 钩子 / 结构 / 可复用方法 */
 const sniffTool: AgentToolSpec = {

@@ -1,7 +1,7 @@
 {
   "name": "baoluo",
   "productName": "宝螺",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "license": "MIT",
   "description": "宝螺 - 素材捕手 · 语音合成 · 对话视频生成",
@@ -26,7 +26,7 @@
     "dev": "concurrently -k -n VITE,ELECTRON -c auto \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite",
     "dev:electron": "wait-on http://localhost:5173 && tsc -p tsconfig.node.json && cross-env NODE_ENV=development electron .",
-    "build": "npm run build:renderer && npm run build:main",
+    "build": "npm run build:renderer && npm run build:main && npm run build:headless",
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.node.json",
     "bump": "npm version --no-git-tag-version --allow-same-version",
@@ -47,7 +47,7 @@
     "test:runtime": "node scripts/test-runtime-detect.cjs",
     "test:llm": "electron scripts/test-llm-runtime.cjs",
     "test:agent-runner": "electron scripts/test-agent-runner.cjs",
-    "test": "node scripts/test-parser.cjs && node scripts/test-agent-router.cjs && node scripts/test-genie-install-env.cjs && node scripts/test-genie-background.cjs",
+    "test": "node scripts/test-parser.cjs && node scripts/test-agent-router.cjs && node scripts/test-genie-install-env.cjs && node scripts/test-genie-background.cjs && node scripts/test-headless-mcp.cjs",
     "test:doubao-gen": "electron scripts/test-doubao-generate.cjs",
     "test:doubao-selectors": "electron scripts/test-doubao-selectors.cjs",
     "test:doubao-batch": "electron scripts/test-doubao-batch.cjs",
@@ -56,7 +56,9 @@
     "test:composer": "node scripts/test-composer.cjs",
     "test:hot-pipeline": "node scripts/test-hot-pipeline.cjs",
     "experiment:doubao-multi": "electron scripts/experiment-doubao-multi.cjs",
-    "probe:doubao-images": "electron scripts/probe-doubao-images.cjs"
+    "probe:doubao-images": "electron scripts/probe-doubao-images.cjs",
+    "build:headless": "node scripts/build-headless.mjs",
+    "test:headless": "node scripts/test-headless-mcp.cjs"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
@@ -67,6 +69,7 @@
     "cross-env": "^7.0.3",
     "electron": "^30.0.0",
     "electron-builder": "^24.13.3",
+    "esbuild": "^0.25.12",
     "typescript": "^5.3.3",
     "vite": "^5.1.4",
     "wait-on": "^7.2.0"

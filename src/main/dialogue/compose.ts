@@ -6,7 +6,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { app, type WebContents } from "electron";
+import type { WebContents } from "electron";
 import type {
   CloneVoice,
   ComposeProgress,
@@ -26,7 +26,12 @@ import { describeFsError } from "../fsError";
 import { currentDataDir } from "../userData";
 
 interface ComposeRunArgs extends ComposeRequest {
-  webContents: WebContents;
+  /**
+   * 进度事件的推送目标（渲染层监听 dialogue:progress）。
+   * **可选**（2026-11-22）：headless 入口（宝螺的 MCP 服务）没有渲染进程，
+   * 传空时只写内存快照、不广播 —— 界面行为不变。
+   */
+  webContents?: WebContents;
   requestId?: string;
 }
 
@@ -123,7 +128,10 @@ export async function runCompose(args: ComposeRunArgs): Promise<{ outputPath: st
         updatedAt: Date.now(),
       };
     }
-    webContents.send("dialogue:progress", { ...p, requestId } satisfies ComposeProgress);
+    // headless（webContents 缺省）只写快照，不广播 —— 界面没开着就没人听
+    if (webContents && !webContents.isDestroyed()) {
+      webContents.send("dialogue:progress", { ...p, requestId } satisfies ComposeProgress);
+    }
   };
 
   // 1. 把两种模式的输入统一成段：{ text, voice, imagePath }
