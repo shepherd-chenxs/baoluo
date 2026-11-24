@@ -11,21 +11,6 @@
 - **AI 工作台**：说一句话，自动拆成任务步骤，逐步生成和修改作品。
 - **外部调用**：提供无窗口服务，可接入班底等自动化平台。
 
-## 快速开始
-
-```bash
-npm install
-npm run dev
-```
-
-首次使用 AI 写脚本或生成分镜需要填自己的 DeepSeek API Key；仓库不包含任何密钥。
-
-## 打包
-
-```bash
-npm run dist
-```
-
 ## 说明
 
 本项目使用 MIT 协议；第三方组件许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。请遵守素材平台规则，只处理你有权使用的视频和声音。
